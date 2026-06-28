@@ -639,6 +639,7 @@ class SelectionBar:
             'select_all': True,
             'extend_selection_to_end_of_line': True,
             'extend_selection_to_start_of_line': True,
+            'extract_anki_sentence': True,
         }
         if sc_name is 'show_chrome':
             self.clear_selection()

@@ -18,6 +18,7 @@ from range_utils import (
     wrap_text_in_range
 )
 from read_book.anchor_visibility import ensure_page_list_target_is_displayed, invalidate_anchor_position_cache
+from read_book.anki_sentence import sentence_for_selection
 from read_book.cfi import cfi_for_selection, range_from_cfi
 from read_book.extract import get_elements
 from read_book.find import reset_find_caches, select_search_result, select_tts_mark, tts_data
@@ -176,6 +177,7 @@ class IframeBoss:
             'get_current_cfi': self.get_current_cfi,
             'initialize':self.initialize,
             'modify_selection': self.modify_selection,
+            'extract_anki_sentence': self.extract_anki_sentence,
             'next_screen': self.on_next_screen,
             'scroll_to_anchor': self.on_scroll_to_anchor,
             'scroll_to_frac': self.on_scroll_to_frac,
@@ -637,6 +639,14 @@ class IframeBoss:
             rtl=scroll_viewport.rtl, vertical=scroll_viewport.vertical_writing_mode,
             start_is_anchor=start_is_anchor
         )
+
+    def extract_anki_sentence(self, data):
+        # Compute the highlighted word + its enclosing Japanese sentence from the
+        # live selection in the book DOM, and send it back to the main process,
+        # which forwards it to Python (-> the Anki client library).
+        result = sentence_for_selection(window.getSelection())
+        if result:
+            self.send_message('anki_sentence', word=result.word, sentence=result.sentence)
 
     def onresize_stage2(self):
         if scroll_viewport.width() is self.last_window_width and scroll_viewport.height() is self.last_window_height:

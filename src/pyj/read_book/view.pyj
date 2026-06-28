@@ -280,6 +280,10 @@ class View:
                 if ui_operations.view_image:
                     ui_operations.view_image(data.calibre_src)
             ,
+            'anki_sentence': def(data):
+                if ui_operations.report_anki_sentence:
+                    ui_operations.report_anki_sentence(data.word, data.sentence)
+            ,
         }
 
         iframe_id = unique_id('read-book-iframe')
@@ -348,6 +352,12 @@ class View:
 
     def copy_to_clipboard(self):
         self.iframe_wrapper.send_message('copy_selection')
+
+    def extract_anki_sentence(self):
+        # Ask the iframe (which owns the book DOM + selection) to compute the
+        # highlighted word and its enclosing sentence; it replies with an
+        # 'anki_sentence' message handled above.
+        self.iframe_wrapper.send_message('extract_anki_sentence')
 
     def show_not_a_library_book_error(self):
         error_dialog(_('Not a calibre library book'), _(
@@ -508,6 +518,8 @@ class View:
             self.new_bookmark()
         elif data.name is 'copy_to_clipboard':
             self.copy_to_clipboard()
+        elif data.name is 'extract_anki_sentence':
+            self.extract_anki_sentence()
         elif data.name is 'copy_location_to_clipboard' or data.name is 'copy_location_as_url_to_clipboard':
             self.copy_current_location_to_clipboard('url' in data.name)
         elif data.name is 'toggle_inspector':

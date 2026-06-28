@@ -206,6 +206,12 @@ def common_shortcuts():  # {{{
         _('Copy to clipboard'),
     ),
 
+    'extract_anki_sentence': desc(
+        v"['Ctrl+Shift+a', 'Meta+Shift+a']",
+        'ui',
+        _('Add highlighted word and sentence to Anki'),
+    ),
+
     'copy_location_to_clipboard': desc(
         v"['Alt+c']",
         'ui',

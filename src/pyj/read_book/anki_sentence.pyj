@@ -1,0 +1,120 @@
+# vim:fileencoding=utf-8
+# License: GPL v3 Copyright: 2026
+# Japanese sentence extraction for the "send highlighted word + sentence to Anki" feature.
+#
+# Given the current selection, this finds the natural sentence enclosing the
+# selected word. The core algorithm (extract_sentence) is a pure function over
+# (paragraph_text, offset) so it can be reasoned about and unit-tested without a
+# DOM; sentence_for_selection wraps it with the DOM bookkeeping to gather the
+# enclosing block's text and locate the selection within it.
+#
+# Boundary model: scan backward and forward to a sentence delimiter (。！？.!?),
+# but ignore any delimiter that sits *inside* a quote/bracket pair, so
+# 田中さんは「ちょっと待って！」と言った。 is treated as ONE sentence even though it
+# contains an internal ！. A final trim drops a stray bracket left dangling at an
+# edge when the selection lands inside a multi-sentence quote.
+
+from __python__ import bound_methods, hash_literals
+
+DELIMS = '。！？.!?\n\r'
+TRAILING = '。、！？…‥」』）)】〉》〕｝}］]'  # chars pulled in after a terminal delimiter
+OPEN = '「『（(【〈《〔｛{［['
+CLOSE = '」』）)】〉》〕｝}］]'  # index-aligned with OPEN: OPEN[i] closes with CLOSE[i]
+
+
+def opener_for(close_char):
+    return OPEN[CLOSE.indexOf(close_char)]
+
+
+def trim_dangling_brackets(s):
+    # Depth-aware scanning can land between bracket pairs (multi-sentence quotes),
+    # leaving a stray 「 at the front or 」 at the back. Strip any bracket char at
+    # an edge that has no partner inside the slice.
+    changed = True
+    while changed and s.length > 1:
+        changed = False
+        first = s[0]
+        if CLOSE.indexOf(first) is not -1 or (OPEN.indexOf(first) is not -1 and s.indexOf(CLOSE[OPEN.indexOf(first)], 1) is -1):
+            s = s[1:].trim()
+            changed = True
+            continue
+        last = s[s.length - 1]
+        if OPEN.indexOf(last) is not -1:
+            s = s[:-1].trim()
+            changed = True
+            continue
+        if CLOSE.indexOf(last) is not -1 and s[:-1].indexOf(opener_for(last)) is -1:
+            s = s[:-1].trim()
+            changed = True
+            continue
+    return s
+
+
+def extract_sentence(text, offset):
+    # --- scan backward to sentence start, ignoring delimiters inside brackets ---
+    depth = 0
+    start = 0
+    i = offset - 1
+    while i >= 0:
+        ch = text[i]
+        if CLOSE.indexOf(ch) is not -1:      # entering a quote from the back
+            depth += 1
+        elif OPEN.indexOf(ch) is not -1:     # leaving it
+            depth = Math.max(0, depth - 1)
+        elif depth is 0 and DELIMS.indexOf(ch) is not -1:
+            start = i + 1
+            break
+        i -= 1
+
+    # --- scan forward to sentence end, ignoring delimiters inside brackets ---
+    depth = 0
+    end = text.length
+    i = offset
+    while i < text.length:
+        ch = text[i]
+        if OPEN.indexOf(ch) is not -1:
+            depth += 1
+        elif CLOSE.indexOf(ch) is not -1:
+            depth = Math.max(0, depth - 1)
+        elif depth is 0 and DELIMS.indexOf(ch) is not -1:
+            end = i + 1
+            while end < text.length and TRAILING.indexOf(text[end]) is not -1:
+                end += 1
+            break
+        i += 1
+
+    return trim_dangling_brackets(text[start:end].trim())
+
+
+def enclosing_block(node):
+    el = node if node.nodeType is not 3 else node.parentElement
+    if not el:
+        return document.body
+    return el.closest('p, li, blockquote, dd, td, section, article, div, body') or document.body
+
+
+# Build the full text of the block containing the selection start, and the
+# offset of the selection start within that text.
+def block_text_and_offset(anchor, anchor_offset):
+    block = enclosing_block(anchor)
+    walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, None, False)
+    full = ''
+    global_offset = None
+    node = walker.nextNode()
+    while node:
+        if node is anchor:
+            global_offset = full.length + anchor_offset
+        full += node.textContent
+        node = walker.nextNode()
+    if global_offset is None:
+        global_offset = 0  # anchor was the block element itself; degrade gracefully
+    return full, global_offset
+
+
+# Returns {word, sentence} for the current selection, or None if nothing is selected.
+def sentence_for_selection(sel):
+    if not sel or sel.rangeCount is 0 or sel.isCollapsed:
+        return None
+    r = sel.getRangeAt(0)
+    full, offset = block_text_and_offset(r.startContainer, r.startOffset)
+    return {'word': sel.toString(), 'sentence': extract_sentence(full, offset)}

@@ -311,6 +311,11 @@ def goto_cfi(cfi, add_to_history):
 
 
 @from_python
+def extract_anki_sentence():
+    return view.extract_anki_sentence()
+
+
+@from_python
 def full_screen_state_changed(viewer_in_full_screen):
     runtime.viewer_in_full_screen = viewer_in_full_screen
 
@@ -468,6 +473,8 @@ if window is window.top:
         to_python.ask_for_open(path)
     ui_operations.copy_selection = def(text, html):
         to_python.copy_selection(text or None, html or None)
+    ui_operations.report_anki_sentence = def(word, sentence):
+        to_python.report_anki_sentence(word, sentence)
     ui_operations.view_image = def(name):
         to_python.view_image(name)
     ui_operations.copy_image = def(name):

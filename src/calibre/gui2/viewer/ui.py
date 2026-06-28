@@ -205,6 +205,7 @@ class EbookViewer(MainWindow):
         self.web_view.selection_changed.connect(self.highlights_widget.selected_text_changed, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.view_image.connect(self.view_image, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.copy_image.connect(self.copy_image, type=Qt.ConnectionType.QueuedConnection)
+        self.web_view.report_anki_sentence.connect(self.add_to_anki, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.show_loading_message.connect(self.show_loading_message)
         self.web_view.show_error.connect(self.show_error)
         self.web_view.print_book.connect(self.print_book, type=Qt.ConnectionType.QueuedConnection)
@@ -426,6 +427,39 @@ class EbookViewer(MainWindow):
         if self.check_for_read_aloud(_('bookmark')):
             return
         self.goto_cfi(cfi, add_to_history=True)
+
+    def send_selection_to_anki(self):
+        # Trigger: ask the book view to compute the highlighted word + sentence.
+        # Bind this to a shortcut or selection-bar button. The result comes back
+        # asynchronously to add_to_anki() via the report_anki_sentence signal.
+        self.web_view.execute_when_ready('extract_anki_sentence')
+
+    def add_to_anki(self, word, sentence):
+        # Receives the highlighted word and its enclosing sentence from the book
+        # view and adds a Kaishi 1.5k card via AnkiConnect. Kept import-lazy and
+        # exception-safe so a missing add-on or stopped Anki never disrupts reading.
+        if not word:
+            return
+        try:
+            from calibre.gui2.viewer.anki_cards.anki_connect import AnkiConnect, build_note
+            from calibre.gui2.viewer.anki_cards.kaishi import MODEL_NAME, build_fields
+        except ImportError as e:
+            return error_dialog(self, _('Anki integration unavailable'), str(e), show=True)
+        deck = 'くまクマ熊ベアー'  # TODO: make configurable
+        client = AnkiConnect()
+        note = build_note(deck, MODEL_NAME, build_fields(word=word, sentence=sentence))
+        try:
+            if client.can_add_note(note):
+                client.add_note(note)
+                msg = _('Adding "{}" to Anki').format(word)
+            else:
+                msg = _('"{}" is already in Anki').format(word)
+        except Exception as e:
+            self.loading_overlay.hide()
+            return error_dialog(self, _('Failed to add to Anki'), str(e), show=True)
+        # Flash the loading overlay briefly as confirmation, then auto-dismiss.
+        self.loading_overlay(msg)
+        QTimer.singleShot(1000, self.loading_overlay.hide)
 
     def view_image(self, name):
         path = get_path_for_name(name)
