@@ -139,6 +139,8 @@ class EbookViewer(MainWindow):
             self.addDockWidget(area, ans)
             ans.setVisible(False)
             ans.visibilityChanged.connect(self.dock_visibility_changed)
+            if ismacos:
+                ans.topLevelChanged.connect(self.on_dock_floating_changed)
             return ans
 
         for dock_def in self.dock_defs.values():
@@ -477,6 +479,14 @@ class EbookViewer(MainWindow):
     def dock_visibility_changed(self):
         vmap = {dock.objectName().partition('-')[0]: dock.toggleViewAction().isChecked() for dock in self.dock_widgets}
         self.actions_toolbar.update_dock_actions(vmap)
+
+    def on_dock_floating_changed(self, floating):
+        dock = self.sender()
+        if floating:
+            # Make the floating dock stay visible when main window loses focus on macOS
+            dock.setWindowFlags(dock.windowFlags() | Qt.WindowType.Tool)
+            dock.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
+            dock.show()  # Required after changing window flags
     # }}}
 
     # Load book {{{
