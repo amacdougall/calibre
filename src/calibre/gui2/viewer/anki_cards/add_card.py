@@ -3,11 +3,13 @@
 #
 # Usage:
 #   ./add_card.py --check                       # is AnkiConnect reachable?
+#   ./add_card.py --lookup 食べている            # offline: show dictionary candidates
 #   ./add_card.py --deck 専門用語 --word 教材 \
 #       --sentence 日本語学習の教材を買った。   # add a real card
 #
-# Requires Anki running with the AnkiConnect add-on. This is deliberately tiny:
-# it exists to prove the core capability end-to-end before any Calibre wiring.
+# --check / add require Anki running with the AnkiConnect add-on; --lookup is
+# fully offline (just JMdict + the deinflector). This is deliberately tiny: it
+# exists to prove the core capabilities end-to-end before any Calibre wiring.
 
 import argparse
 import sys
@@ -19,12 +21,25 @@ from kaishi import MODEL_NAME, build_fields
 def main():
     p = argparse.ArgumentParser(description='Add a Kaishi 1.5k card via AnkiConnect.')
     p.add_argument('--check', action='store_true', help='Only check AnkiConnect availability.')
+    p.add_argument('--lookup', metavar='TEXT', help='Offline: print JMdict candidates for TEXT and exit.')
     p.add_argument('--deck', help='Target deck name.')
     p.add_argument('--word', help='Highlighted word (Word field).')
     p.add_argument('--sentence', default='', help='Surrounding sentence (Sentence field).')
     p.add_argument('--note', default='', help='Free-form note (Notes field).')
     p.add_argument('--allow-duplicate', action='store_true', help='Add even if a duplicate exists.')
     args = p.parse_args()
+
+    if args.lookup:
+        from lookup import lookup_candidates
+        candidates = lookup_candidates(args.lookup)
+        if not candidates:
+            print(f'No dictionary matches for "{args.lookup}".')
+            return 0
+        for i, c in enumerate(candidates, 1):
+            reasons = (' ← ' + ' '.join(c['reasons'])) if c['reasons'] else ''
+            print(f'{i}. {c["word"]} [{c["reading"]}] '
+                  f'({", ".join(c["pos"])}){reasons}\n   {c["meaning"][:100]}')
+        return 0
 
     client = AnkiConnect()
 
