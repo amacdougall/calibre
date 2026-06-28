@@ -205,7 +205,13 @@ class EbookViewer(MainWindow):
         self.web_view.selection_changed.connect(self.highlights_widget.selected_text_changed, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.view_image.connect(self.view_image, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.copy_image.connect(self.copy_image, type=Qt.ConnectionType.QueuedConnection)
-        self.web_view.report_anki_sentence.connect(self.add_to_anki, type=Qt.ConnectionType.QueuedConnection)
+        # Anki mining: report_anki_sentence kicks off a JMdict lookup, the popup
+        # choice comes back via choose_anki_candidate. _anki_pending stashes each
+        # in-flight request's sentence keyed by a request id.
+        self._anki_pending = {}
+        self._anki_next_request_id = 0
+        self.web_view.report_anki_sentence.connect(self.on_anki_selection, type=Qt.ConnectionType.QueuedConnection)
+        self.web_view.choose_anki_candidate.connect(self.add_to_anki, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.show_loading_message.connect(self.show_loading_message)
         self.web_view.show_error.connect(self.show_error)
         self.web_view.print_book.connect(self.print_book, type=Qt.ConnectionType.QueuedConnection)
@@ -431,15 +437,45 @@ class EbookViewer(MainWindow):
     def send_selection_to_anki(self):
         # Trigger: ask the book view to compute the highlighted word + sentence.
         # Bind this to a shortcut or selection-bar button. The result comes back
-        # asynchronously to add_to_anki() via the report_anki_sentence signal.
+        # asynchronously to on_anki_selection() via the report_anki_sentence signal.
         self.web_view.execute_when_ready('extract_anki_sentence')
 
-    def add_to_anki(self, word, sentence):
-        # Receives the highlighted word and its enclosing sentence from the book
-        # view and adds a Kaishi 1.5k card via AnkiConnect. Kept import-lazy and
-        # exception-safe so a missing add-on or stopped Anki never disrupts reading.
+    def on_anki_selection(self, word, sentence):
+        # First half of the mining flow: the book view has given us the selected
+        # word + its sentence. Look the word up in JMdict (deinflecting verbs /
+        # adjectives) and push the candidate dictionary entries to the viewer so
+        # the user can pick which one to mine. The sentence is stashed here keyed
+        # by a request id, so the later choice need not carry it back across the
+        # bridge. Import-lazy + exception-safe: a missing dictionary degrades to
+        # mining the raw selection rather than disrupting reading.
         if not word:
             return
+        try:
+            from calibre.gui2.viewer.anki_cards.lookup import lookup_candidates
+            candidates = lookup_candidates(word)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            candidates = []
+        request_id = str(self._anki_next_request_id)
+        self._anki_next_request_id += 1
+        self._anki_pending[request_id] = {'sentence': sentence, 'word': word}
+        self.web_view.execute_when_ready('show_anki_candidates', request_id, candidates, word)
+
+    def add_to_anki(self, request_id, chosen_entry):
+        # Second half: the user picked a candidate (or the raw-selection fallback)
+        # in the popup. Build a Kaishi 1.5k card from the chosen dictionary entry
+        # plus the stashed sentence and add it via AnkiConnect. A None entry means
+        # the popup was cancelled.
+        pending = self._anki_pending.pop(str(request_id), None)
+        if chosen_entry is None:
+            return
+        sentence = (pending or {}).get('sentence', '')
+        word = chosen_entry.get('word') or (pending or {}).get('word')
+        if not word:
+            return
+        reading = chosen_entry.get('reading') or ''
+        meaning = chosen_entry.get('meaning') or ''
         try:
             from calibre.gui2.viewer.anki_cards.anki_connect import AnkiConnect, build_note
             from calibre.gui2.viewer.anki_cards.kaishi import MODEL_NAME, build_fields
@@ -447,7 +483,8 @@ class EbookViewer(MainWindow):
             return error_dialog(self, _('Anki integration unavailable'), str(e), show=True)
         deck = get_session_pref('anki_deck', default='くまクマ熊ベアー', group=None)
         client = AnkiConnect()
-        note = build_note(deck, MODEL_NAME, build_fields(word=word, sentence=sentence))
+        note = build_note(deck, MODEL_NAME, build_fields(
+            word=word, sentence=sentence, reading=reading, meaning=meaning))
         try:
             if client.can_add_note(note):
                 client.add_note(note)

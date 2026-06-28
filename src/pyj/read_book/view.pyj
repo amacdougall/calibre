@@ -12,8 +12,9 @@ from book_list.theme import cached_color_to_rgba, get_color, set_ui_colors
 from book_list.ui import show_panel
 from dom import add_extra_css, build_rule, clear, set_css, svgicon, unique_id
 from gettext import gettext as _
+from book_list.item_list import create_item, create_item_list
 from iframe_comm import create_wrapped_iframe
-from modals import error_dialog, warning_dialog
+from modals import create_custom_dialog, error_dialog, warning_dialog
 from read_book.annotations import AnnotationsManager
 from read_book.bookmarks import create_new_bookmark
 from read_book.content_popup import ContentPopupOverlay
@@ -358,6 +359,51 @@ class View:
         # highlighted word and its enclosing sentence; it replies with an
         # 'anki_sentence' message handled above.
         self.iframe_wrapper.send_message('extract_anki_sentence')
+
+    def show_anki_candidates(self, request_id, candidates, raw_word):
+        # Python looked the selection up in JMdict and pushed the candidate
+        # dictionary entries here. Show them in a modal; the user's pick (or a
+        # cancel) is reported straight back to Python via choose_anki_candidate.
+        state = {'done': False}
+
+        def choose(entry, close_modal):
+            state.done = True
+            if ui_operations.choose_anki_candidate:
+                ui_operations.choose_anki_candidate(request_id, entry)
+            close_modal()
+
+        def on_close(ev):
+            # Fires on Escape / close button too; tell Python to drop the
+            # pending request if nothing was picked.
+            if not state.done:
+                state.done = True
+                if ui_operations.choose_anki_candidate:
+                    ui_operations.choose_anki_candidate(request_id, None)
+
+        def content(parent, close_modal):
+            items = v'[]'
+            for entry in candidates:
+                title = entry.word or entry.reading or ''
+                if entry.reading and entry.reading is not entry.word:
+                    title = title + ' 【' + entry.reading + '】'
+                if entry.reasons and entry.reasons.length:
+                    title = title + ' ← ' + entry.reasons.join(' ')
+                subtitle = ''
+                if entry.pos and entry.pos.length:
+                    subtitle = entry.pos.join(', ')
+                if entry.meaning:
+                    subtitle = (subtitle + ' · ' if subtitle else '') + entry.meaning
+                items.push(create_item(title, choose.bind(None, entry, close_modal), subtitle))
+            # Always offer mining the raw selection verbatim, so a bad
+            # deinflection or a no-match never blocks the user.
+            raw_entry = {'word': raw_word, 'reading': '', 'meaning': ''}
+            items.push(create_item(
+                _('Mine raw selection:') + ' ' + raw_word,
+                choose.bind(None, raw_entry, close_modal)))
+            create_item_list(parent, items)
+
+        title = _('Add to Anki') + ' — ' + raw_word
+        create_custom_dialog(title, content, on_close)
 
     def show_not_a_library_book_error(self):
         error_dialog(_('Not a calibre library book'), _(
