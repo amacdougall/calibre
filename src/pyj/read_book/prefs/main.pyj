@@ -9,6 +9,7 @@ from book_list.top_bar import create_top_bar, set_title
 from dom import clear, ensure_id
 from gettext import gettext as _
 from read_book.globals import runtime
+from read_book.prefs.anki import commit_anki, create_anki_panel
 from read_book.prefs.colors import commit_colors, create_colors_panel
 from read_book.prefs.fonts import commit_fonts, create_fonts_panel
 from read_book.prefs.head_foot import commit_head_foot, create_head_foot_panel
@@ -109,6 +110,7 @@ class Prefs:
         ci(_('Selection behavior'), 'selection', _('Control how the viewer selects text'))
         ci(_('Touch behavior'), 'touch', _('Customize what various touchscreen gestures do'))
         ci(_('Keyboard shortcuts'), 'keyboard', _('Customize the keyboard shortcuts'))
+        ci(_('Anki integration'), 'anki', _('Configure mining cards into Anki while reading'))
         if runtime.is_standalone_viewer:
             ci(_('Fonts'), 'fonts', _('Font choices'))
             ci(_('Miscellaneous'), 'misc', _('Window size, last read position, toolbar, etc.'))
@@ -173,6 +175,12 @@ class Prefs:
 
     def close_touch(self):
         commit_touch(self.onchange, self.container)
+
+    def display_anki(self, container):
+        self.create_panel(container, 'anki', create_anki_panel)
+
+    def close_anki(self):
+        commit_anki(self.onchange, self.container)
 
 
 

@@ -445,7 +445,7 @@ class EbookViewer(MainWindow):
             from calibre.gui2.viewer.anki_cards.kaishi import MODEL_NAME, build_fields
         except ImportError as e:
             return error_dialog(self, _('Anki integration unavailable'), str(e), show=True)
-        deck = 'くまクマ熊ベアー'  # TODO: make configurable
+        deck = get_session_pref('anki_deck', default='くまクマ熊ベアー', group=None)
         client = AnkiConnect()
         note = build_note(deck, MODEL_NAME, build_fields(word=word, sentence=sentence))
         try:

@@ -1,0 +1,61 @@
+# vim:fileencoding=utf-8
+# License: GPL v3 Copyright: 2026
+from __python__ import bound_methods, hash_literals
+
+from elementmaker import E
+
+from book_list.globals import get_session_data
+from dom import unique_id
+from gettext import gettext as _
+from read_book.prefs.utils import create_button_box
+from session import session_defaults
+
+CONTAINER = unique_id('anki-settings')
+
+
+def get_container():
+    return document.getElementById(CONTAINER)
+
+
+def restore_defaults():
+    container = get_container()
+    sd = session_defaults()
+    for control in container.querySelectorAll('input[name]'):
+        control.value = sd[control.getAttribute('name')]
+
+
+def create_anki_panel(container, apply_func, cancel_func):
+    container.appendChild(E.div(id=CONTAINER, style='margin: 1rem'))
+    container = container.lastChild
+    sd = get_session_data()
+
+    container.appendChild(E.div(
+        _('Settings for mining cards into Anki while reading. Anki must be running with'
+          ' the AnkiConnect add-on installed.')
+    ))
+
+    inp = E.input(type='text', name='anki_deck', size='40', style='margin-top: 1ex')
+    inp.value = sd.get('anki_deck') or ''
+    container.appendChild(E.div(
+        style='margin-top: 2ex',
+        E.label(_('Name of the Anki deck to add mined cards to:'), E.br(), inp)
+    ))
+
+    container.appendChild(create_button_box(restore_defaults, apply_func, cancel_func))
+
+
+develop = create_anki_panel
+
+
+def commit_anki(onchange):
+    sd = get_session_data()
+    container = get_container()
+    changed = False
+    for control in container.querySelectorAll('input[name]'):
+        name = control.getAttribute('name')
+        val = (control.value or '').strip() or session_defaults()[name]
+        if val is not sd.get(name):
+            sd.set(name, val)
+            changed = True
+    if changed:
+        onchange()
