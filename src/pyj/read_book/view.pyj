@@ -380,6 +380,11 @@ class View:
                 if ui_operations.choose_anki_candidate:
                     ui_operations.choose_anki_candidate(request_id, None)
 
+        # Always offer mining the raw selection verbatim, so a bad
+        # deinflection or a no-match never blocks the user.
+        raw_entry = {'word': raw_word, 'reading': '', 'meaning': ''}
+        first_entry = candidates[0] if candidates and candidates.length else raw_entry
+
         def content(parent, close_modal):
             items = v'[]'
             for entry in candidates:
@@ -394,16 +399,24 @@ class View:
                 if entry.meaning:
                     subtitle = (subtitle + ' · ' if subtitle else '') + entry.meaning
                 items.push(create_item(title, choose.bind(None, entry, close_modal), subtitle))
-            # Always offer mining the raw selection verbatim, so a bad
-            # deinflection or a no-match never blocks the user.
-            raw_entry = {'word': raw_word, 'reading': '', 'meaning': ''}
             items.push(create_item(
                 _('Mine raw selection:') + ' ' + raw_word,
                 choose.bind(None, raw_entry, close_modal)))
             create_item_list(parent, items)
 
+        def on_keydown(event, close_modal):
+            if event.altKey or event.ctrlKey or event.metaKey or event.shiftKey:
+                return
+            if event.key is 'Escape' or event.key is 'Esc':
+                event.preventDefault(), event.stopPropagation()
+                on_close(event)
+                close_modal()
+            elif event.key is 'Enter':
+                event.preventDefault(), event.stopPropagation()
+                choose(first_entry, close_modal)
+
         title = _('Add to Anki') + ' — ' + raw_word
-        create_custom_dialog(title, content, on_close)
+        create_custom_dialog(title, content, on_close, onkeydown=on_keydown)
 
     def show_not_a_library_book_error(self):
         error_dialog(_('Not a calibre library book'), _(
