@@ -16,6 +16,8 @@
 
 from __python__ import bound_methods, hash_literals
 
+from read_book.selection_text import is_ruby_annotation, selection_text
+
 DELIMS = '。！？.!?\n\r'
 TRAILING = '。、！？…‥」』）)】〉》〕｝}］]'  # chars pulled in after a terminal delimiter
 OPEN = '「『（(【〈《〔｛{［['
@@ -97,7 +99,12 @@ def enclosing_block(node):
 # offset of the selection start within that text.
 def block_text_and_offset(anchor, anchor_offset):
     block = enclosing_block(anchor)
-    walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, None, False)
+    # Skip furigana (ruby rt/rp/rtc) text nodes so the reconstructed sentence
+    # contains only base text — matching selection_text used for the word and
+    # keeping the selection-start offset consistent.
+    def ruby_filter(node):
+        return NodeFilter.FILTER_REJECT if is_ruby_annotation(node) else NodeFilter.FILTER_ACCEPT
+    walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, ruby_filter, False)
     full = ''
     global_offset = None
     node = walker.nextNode()
@@ -117,4 +124,4 @@ def sentence_for_selection(sel):
         return None
     r = sel.getRangeAt(0)
     full, offset = block_text_and_offset(r.startContainer, r.startOffset)
-    return {'word': sel.toString(), 'sentence': extract_sentence(full, offset)}
+    return {'word': selection_text(sel), 'sentence': extract_sentence(full, offset)}

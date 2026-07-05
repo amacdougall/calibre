@@ -1,0 +1,40 @@
+# vim:fileencoding=utf-8
+# License: GPL v3 Copyright: 2026
+# Extract plain text from a selection, with furigana and all HTML formatting removed.
+#
+# Furigana is encoded as ruby annotations: <ruby>悠<rt>ゆう</rt></ruby>. The
+# browser's Selection.toString() and Range.cloneContents() both include the <rt>
+# reading text, so a selection of 悠々 comes out as 悠ゆうう々 — wrong for
+# dictionary lookup, Anki mining, and copy/paste. strip_ruby drops the ruby
+# annotation elements (rt = reading, rp = fallback parens, rtc = reading
+# container) while keeping the base text; selection_text then reads textContent,
+# which discards all other markup as well (we only ever want plain text).
+
+from __python__ import bound_methods, hash_literals
+
+RUBY_ANNOTATION_TAGS = 'rt, rp, rtc'
+
+
+def strip_ruby(fragment):
+    # Remove ruby annotation (furigana) elements from a cloned DOM fragment,
+    # in place, and return it. Works on DocumentFragment and Element alike.
+    for el in fragment.querySelectorAll(RUBY_ANNOTATION_TAGS):
+        el.parentNode.removeChild(el)
+    return fragment
+
+
+def selection_text(sel):
+    # The selection's plain text, with furigana removed and all other formatting
+    # flattened away. Returns '' when there is no (non-collapsed) selection.
+    if not sel or sel.rangeCount is 0 or sel.isCollapsed:
+        return ''
+    parts = v'[]'
+    for i in range(sel.rangeCount):
+        parts.push(strip_ruby(sel.getRangeAt(i).cloneContents()).textContent)
+    return parts.join('')
+
+
+def is_ruby_annotation(node):
+    # True if node (or, for a text node, its parent) lives inside an rt/rp/rtc.
+    el = node if node.nodeType is not Node.TEXT_NODE else node.parentElement
+    return bool(el and el.closest(RUBY_ANNOTATION_TAGS))

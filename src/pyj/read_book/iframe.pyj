@@ -51,6 +51,7 @@ from read_book.globals import (
 from read_book.highlights import highlight_style_as_css
 from read_book.hints import apply_prefix_to_hints, hint_visible_links, unhint_links
 from read_book.mathjax import apply_mathjax
+from read_book.selection_text import selection_text
 from read_book.paged_mode import anchor_funcs as paged_anchor_funcs
 from read_book.paged_mode import auto_scroll_action as paged_auto_scroll_action
 from read_book.paged_mode import (
@@ -245,6 +246,7 @@ class IframeBoss:
         window.addEventListener('dblclick', self.ondoubleclick, {'passive': True})
         document.documentElement.addEventListener('contextmenu', self.oncontextmenu, {'passive': False})
         document.addEventListener('selectionchange', self.onselectionchange)
+        document.addEventListener('copy', self.oncopy)
         self.color_scheme = data.color_scheme
         create_touch_handlers()
 
@@ -559,7 +561,7 @@ class IframeBoss:
                 selection = window.getSelection()
                 selcfi = seltext = None
                 if selection and not selection.isCollapsed:
-                    seltext = selection.toString()
+                    seltext = selection_text(selection)
                     selcfi = cfi_for_selection()
                     selcfi.start = epubcfi(selcfi.start)
                     selcfi.end = epubcfi(selcfi.end)
@@ -626,7 +628,7 @@ class IframeBoss:
         collapsed = not sel or sel.isCollapsed
         start_is_anchor = True
         if not collapsed:
-            text = sel.toString()
+            text = selection_text(sel)
             annot_id = highlight_associated_with_selection(sel, annot_id_uuid_map)
             r = sel.getRangeAt(0)
             start_is_anchor = r.startContainer is sel.anchorNode and r.startOffset is sel.anchorOffset
@@ -879,7 +881,7 @@ class IframeBoss:
         if not sel.rangeCount:
             return
         anchor_before = find_anchor_before_range(sel.getRangeAt(0), self.book.manifest.toc_anchor_map, self.book.manifest.page_list_anchor_map)
-        text = sel.toString()
+        text = selection_text(sel)
         bounds = cfi_for_selection()
         style = highlight_style_as_css(style_defn, opts.is_dark_theme, opts.color_scheme.foreground)
         cls = 'crw-has-dot' if has_notes else None
@@ -989,7 +991,7 @@ class IframeBoss:
             if not sel.rangeCount:
                 return
             bounds = cfi_for_selection()
-            text = sel.toString()
+            text = selection_text(sel)
             self.send_message('annotations', type='cite-data', bounds=bounds, highlighted_text=text)
         else:
             console.log('Ignoring annotations message to iframe with unknown type: ' + dtype)
@@ -1026,20 +1028,29 @@ class IframeBoss:
             ev.preventDefault(), ev.stopPropagation()
             select_crw(crw)
 
+    def oncopy(self, ev):
+        # Intercept both native Cmd/Ctrl+C and execCommand('copy') so the
+        # clipboard gets furigana-free plain text only (no ruby readings, no
+        # HTML formatting). Without this, Chromium copies the rendered selection,
+        # which includes <rt> reading text.
+        text = selection_text(window.getSelection())
+        if text and ev.clipboardData:
+            ev.clipboardData.setData('text/plain', text)
+            ev.preventDefault()
+
     def copy_selection(self):
         try:
             if document.execCommand('copy'):
+                # The copy event fires synchronously here and oncopy has already
+                # put furigana-free plain text on the clipboard.
                 return
         except:
             pass
 
-        s = window.getSelection()
-        text = s.toString()
+        # Fallback path when execCommand is unavailable: plain text only.
+        text = selection_text(window.getSelection())
         if text:
-            container = document.createElement('div')
-            for i in range(s.rangeCount):
-                container.appendChild(s.getRangeAt(i).cloneContents())
-            self.send_message('copy_text_to_clipboard', text=text, html=container.innerHTML)
+            self.send_message('copy_text_to_clipboard', text=text)
 
     def tts_msg_received(self, data):
         if data.type is 'mark':
