@@ -24,6 +24,18 @@ MAX_RESULTS = 16
 # Kept small on purpose: trimming aggressively would let any leading-kana run
 # match some short common word and flood the popup with noise.
 TRAILING_TRIM = 3
+# Cap on forward-completion (prefix) matches folded in per lookup. The panel may
+# ask for more; the popup slices to MAX_RESULTS anyway. Keeps 食べ (~dozens of
+# completions) from flooding.
+PREFIX_LIMIT = 50
+
+# Match tiers, most-certain first. The tier is the *primary* sort key: a match
+# that explains the whole selection always outranks a guess at unseen
+# characters, regardless of frequency (added as a tiebreaker in a later phase).
+TIER_LITERAL = 0      # full selection is a headword/reading, no inflection
+TIER_DEINFLECTED = 1  # full selection deinflects to a dictionary-form headword
+TIER_PREFIX = 2       # headword/reading starts with the selection (completion)
+TIER_TRIM = 3         # last resort: over-selection absorbed by trailing-trim
 
 
 def _meaning_text(senses):
@@ -43,13 +55,17 @@ def _flat_pos(senses):
     return list(seen.keys())
 
 
-def _candidate_entry(entry, reasons, matched_term):
+def _candidate_entry(entry, reasons, matched_term, completed_from=None):
     '''Shape a JMdict entry (+ the deinflection chain that found it) into the
-    JSON-able dict that crosses the bridge and drives the popup.
+    JSON-able dict that crosses the bridge and drives the popup / panel.
 
     ``matched_term`` is the (deinflected) form that hit this entry; when it is
     one of the entry's readings we surface that reading as primary, so a lookup
     by kana shows the reading the user actually selected.
+
+    ``completed_from`` is set to the selection prefix when this entry was reached
+    by forward completion (突き込 -> 突き込む); the UI annotates it ("completed
+    from 突き込"), mirroring the deinflection annotation built from ``reasons``.
     '''
     kanji = entry['kanji']
     readings = entry['readings']
@@ -68,46 +84,70 @@ def _candidate_entry(entry, reasons, matched_term):
         'meaning': _meaning_text(senses),
         'glosses': glosses,
         'reasons': reasons,
+        'completed_from': completed_from,
     }
 
 
-def _collect_for_surface(db, surface, best):
-    '''Deinflect ``surface``, look each candidate up, and merge matches into
-    ``best`` (ent_seq -> (chain_len, candidate)), keeping the shortest
-    deinflection chain per entry.'''
+def _collect_exact(db, surface, consider, force_tier=None):
+    '''Deinflect ``surface``, look each candidate up, and hand matches to
+    ``consider``. Untrimmed calls split into TIER_LITERAL (raw surface, no
+    inflection) vs TIER_DEINFLECTED (deinflected); trailing-trim calls pass
+    ``force_tier=TIER_TRIM`` to sink every match to the last-resort tier.'''
     for d in deinflect(surface):
         for entry in db.lookup_exact(d.term):
             if not rules_compatible(d.rules, _flat_pos(entry['senses'])):
                 continue
-            ent_seq = entry['ent_seq']
-            chain_len = len(d.reasons)
-            if ent_seq not in best or chain_len < best[ent_seq][0]:
-                best[ent_seq] = (chain_len, _candidate_entry(entry, d.reasons, d.term))
+            if force_tier is not None:
+                tier = force_tier
+            else:
+                tier = TIER_LITERAL if not d.reasons else TIER_DEINFLECTED
+            consider(tier, len(d.reasons), _candidate_entry(entry, d.reasons, d.term))
 
 
-def lookup_candidates(selection, max_results=MAX_RESULTS, db=None):
+def _collect_prefix(db, surface, limit, consider):
+    '''Fold jisho-style forward completions of ``surface`` in at TIER_PREFIX.'''
+    for entry in db.lookup_prefix(surface, limit):
+        consider(TIER_PREFIX, 0, _candidate_entry(entry, [], '', completed_from=surface))
+
+
+def lookup_candidates(selection, max_results=MAX_RESULTS, db=None, prefix_limit=PREFIX_LIMIT):
     '''Return candidate dictionary entries for a selected string.
 
-    Tries the full selection (raw form first, then its deinflections); only if
-    nothing matches does it fall back to shorter leading prefixes. Returns a
-    list of candidate dicts ordered surface-form / shortest-chain first, deduped
-    by ent_seq, capped at ``max_results``. Empty list if nothing matches.
+    Builds one richly-tiered list (see the TIER_* constants): a literal or
+    deinflected match on the *whole* selection outranks any forward-completion
+    guess, which in turn outranks the trailing-trim last resort. Trailing-trim
+    only runs when nothing else matched (over-selection like 食べていますが).
+    Deduped by ent_seq keeping the best (tier, chain-length); capped at
+    ``max_results``. Empty list if nothing matches.
     '''
     surface = (selection or '').strip()
     if not surface:
         return []
     db = db or JMdict()
 
-    best = {}
-    min_len = max(1, len(surface) - TRAILING_TRIM)
-    for length in range(len(surface), min_len - 1, -1):
-        _collect_for_surface(db, surface[:length], best)
-        if best:
-            # Found matches at this (longest possible) prefix; don't shorten further.
-            break
+    best = {}  # ent_seq -> (tier, chain_len, candidate)
 
-    ordered = sorted(best.values(), key=lambda t: t[0])  # by deinflection-chain length
-    return [cand for _chain_len, cand in ordered][:max_results]
+    def consider(tier, chain_len, cand):
+        ent_seq = cand['ent_seq']
+        key = (tier, chain_len)
+        if ent_seq not in best or key < best[ent_seq][:2]:
+            best[ent_seq] = (tier, chain_len, cand)
+
+    # Whole-selection matches: literal + deinflected, then forward completion.
+    _collect_exact(db, surface, consider)
+    _collect_prefix(db, surface, prefix_limit, consider)
+
+    # Last resort: nothing explained the selection, so absorb an over-selected
+    # trailing particle by retrying shorter leading prefixes.
+    if not best:
+        min_len = max(1, len(surface) - TRAILING_TRIM)
+        for length in range(len(surface) - 1, min_len - 1, -1):
+            _collect_exact(db, surface[:length], consider, force_tier=TIER_TRIM)
+            if best:
+                break
+
+    ordered = sorted(best.values(), key=lambda t: (t[0], t[1]))
+    return [cand for _tier, _chain_len, cand in ordered][:max_results]
 
 
 def _selftest():
@@ -138,6 +178,31 @@ def _selftest():
     # over-selected trailing particle is absorbed by the small prefix trim
     assert '食べる' in words('食べていますが'), 'trailing が should be trimmed'
     print('ok trailing-particle 食べていますが -> 食べる')
+
+    # forward completion: under-selected stems reach the full headword, and are
+    # annotated via completed_from
+    for partial, expected in (('突き込', '突き込む'), ('漬け込', '漬け込む')):
+        cands = lookup_candidates(partial, db=db)
+        match = next((c for c in cands if c['word'] == expected), None)
+        assert match is not None, f'{partial} should complete to {expected}, got {[c["word"] for c in cands]}'
+        assert match['completed_from'] == partial, 'completion must record completed_from'
+        print(f'ok completion {partial} -> {expected}')
+
+    # deinflected/literal match on the whole selection outranks any completion:
+    # 食べ deinflects to 食べる (masu-stem) which must beat completions like 食べ物
+    tabe = lookup_candidates('食べ', db=db)
+    assert tabe, '食べ should yield candidates'
+    taberu_idx = next((i for i, c in enumerate(tabe) if c['word'] == '食べる'), None)
+    completion_idxs = [i for i, c in enumerate(tabe) if c['completed_from']]
+    assert taberu_idx is not None, f'食べ should surface 食べる, got {[c["word"] for c in tabe]}'
+    if completion_idxs:
+        assert taberu_idx < min(completion_idxs), '食べる must rank above completions'
+    print(f'ok 食べ -> 食べる ranks above completions ({[c["word"] for c in tabe][:6]})')
+
+    # flood guard: a short common prefix stays capped at max_results
+    flood = lookup_candidates('食べ', db=db, max_results=16)
+    assert len(flood) <= 16, 'completion flood should be capped'
+    print(f'ok 食べ flood capped at {len(flood)}')
 
     # ambiguous: はし returns several distinct dictionary entries
     hashi = lookup_candidates('はし', db=db)

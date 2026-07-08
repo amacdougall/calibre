@@ -62,6 +62,32 @@ class JMdict:
             (surface, surface)).fetchall()
         return [self._entry(ent_seq) for (ent_seq,) in rows]
 
+    def lookup_prefix(self, surface, limit=50):
+        '''Return entries whose kanji headword OR reading *starts with*
+        ``surface`` (left-anchored prefix), for jisho-style forward completion
+        of an under-selected stem (突き込 -> 突き込む).
+
+        Exact equals are excluded so callers can tier completions strictly below
+        exact/deinflected matches. Implemented as a half-open range scan
+        (``text >= surface AND text < surface++``) so the existing BINARY
+        ``text`` indexes are used; capped at ``limit`` to guard against floods
+        (食べ has dozens of completions). Entry shape matches ``lookup_exact``.
+        '''
+        if not surface:
+            return []
+        # Upper bound of the prefix range: surface with its final code point
+        # bumped by one, e.g. '突き込' -> '突き' + chr(ord('込')+1).
+        hi = surface[:-1] + chr(ord(surface[-1]) + 1)
+        cur = self.conn.cursor()
+        rows = cur.execute(
+            'SELECT ent_seq FROM ('
+            '  SELECT text, ent_seq FROM kanji WHERE text >= ? AND text < ? AND text != ? '
+            '  UNION '
+            '  SELECT text, ent_seq FROM reading WHERE text >= ? AND text < ? AND text != ? '
+            ') LIMIT ?',
+            (surface, hi, surface, surface, hi, surface, limit)).fetchall()
+        return [self._entry(ent_seq) for (ent_seq,) in rows]
+
     def _entry(self, ent_seq):
         cur = self.conn.cursor()
         kanji = [r[0] for r in cur.execute(
@@ -113,6 +139,18 @@ def _selftest():
 
     assert db.lookup_exact('そんなんあるわけない') == [], 'nonsense should be empty'
     print('ok nonsense -> []')
+
+    # forward completion: 突き込 (partial stem) reaches 突き込む
+    comp = db.lookup_prefix('突き込')
+    comp_kanji = {k for e in comp for k in e['kanji']}
+    assert '突き込む' in comp_kanji, f'突き込む should complete 突き込, got {comp_kanji}'
+    assert '突き込' not in comp_kanji, 'exact equals excluded from completions'
+    print(f'ok prefix 突き込 -> {sorted(comp_kanji)[:6]}')
+
+    # flood guard: a short common prefix is capped
+    flood = db.lookup_prefix('食べ', limit=10)
+    assert len(flood) <= 10, 'prefix limit should cap results'
+    print(f'ok prefix 食べ capped at {len(flood)}')
     print('All JMdict self-tests passed.')
 
 
