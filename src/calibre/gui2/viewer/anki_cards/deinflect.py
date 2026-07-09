@@ -112,6 +112,45 @@ def deinflect(source):
     return results
 
 
+def complete_partial_inflection(source):
+    '''Deinflection guesses for a selection that stops PART-WAY through an
+    inflection.
+
+    A reader who selects 擦ら (the first two chars of 擦られる) has given us only
+    a *prefix* of the passive suffix. Ordinary ``deinflect`` needs the whole
+    suffix (``endswith(kanaIn)``) so it finds nothing, and headword-prefix
+    completion can't help because 擦る does not start with 擦ら. Here we treat the
+    missing tail as unseen: for every rule whose inflected suffix ``source`` ends
+    with a *proper prefix* of, strip that partial suffix and append the rule's
+    deinflected suffix (kanaOut), yielding a one-step dictionary-form guess
+    (擦ら + passive-rule 'られる'→'る'  =>  擦る).
+
+    Deliberately over-generates; callers look each guess up in JMdict and check
+    ``rules_compatible``, so bogus completions vanish. A non-empty stem is
+    required so a bare particle (ら) is never completed into a verb.
+    '''
+    seen = set()
+    results = []
+    for kana_in, kana_out, in_mask, out_mask, reason in _REASONS:
+        # Proper prefixes only (1 .. len-1); a full-suffix match is what ordinary
+        # deinflect already handles.
+        for plen in range(1, len(kana_in)):
+            if not source.endswith(kana_in[:plen]):
+                continue
+            stem = source[:len(source) - plen]
+            if not stem:  # would complete a bare inflection fragment; skip
+                continue
+            base = stem + kana_out
+            if base == source:
+                continue
+            key = (base, out_mask, reason)
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(Deinflection(base, out_mask, [reason]))
+    return results
+
+
 def pos_to_mask(pos):
     '''Map a single JMdict part-of-speech tag to a RULE_TYPES bit (0 if none).
 

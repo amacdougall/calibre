@@ -12,10 +12,10 @@ import sys
 # (calibre.gui2.viewer.anki_cards.lookup), bare when run as a CLI script from
 # inside this directory (python3 lookup.py ...).
 try:
-    from .deinflect import deinflect, rules_compatible
+    from .deinflect import complete_partial_inflection, deinflect, rules_compatible
     from .jmdict import JMdict
 except ImportError:
-    from deinflect import deinflect, rules_compatible
+    from deinflect import complete_partial_inflection, deinflect, rules_compatible
     from jmdict import JMdict
 
 MAX_RESULTS = 16
@@ -105,9 +105,20 @@ def _collect_exact(db, surface, consider, force_tier=None):
 
 
 def _collect_prefix(db, surface, limit, consider):
-    '''Fold jisho-style forward completions of ``surface`` in at TIER_PREFIX.'''
+    '''Fold jisho-style forward completions of ``surface`` in at TIER_PREFIX.
+
+    Two completion mechanisms, both guesses at unseen trailing characters:
+      * headword completion  — 突き込 -> 突き込む (a headword starts with surface)
+      * inflection completion — 擦ら  -> 擦る   (surface is a partial inflection)
+    '''
     for entry in db.lookup_prefix(surface, limit):
         consider(TIER_PREFIX, 0, _candidate_entry(entry, [], '', completed_from=surface))
+    for comp in complete_partial_inflection(surface):
+        for entry in db.lookup_exact(comp.term):
+            if not rules_compatible(comp.rules, _flat_pos(entry['senses'])):
+                continue
+            consider(TIER_PREFIX, len(comp.reasons),
+                     _candidate_entry(entry, comp.reasons, comp.term, completed_from=surface))
 
 
 def lookup_candidates(selection, max_results=MAX_RESULTS, db=None, prefix_limit=PREFIX_LIMIT):
@@ -187,6 +198,16 @@ def _selftest():
         assert match is not None, f'{partial} should complete to {expected}, got {[c["word"] for c in cands]}'
         assert match['completed_from'] == partial, 'completion must record completed_from'
         print(f'ok completion {partial} -> {expected}')
+
+    # inflection completion: a selection cut off mid-inflection still resolves
+    # (擦ら is the passive/negative stem of 擦る; neither headword completion nor
+    # plain deinflection reaches it)
+    for partial, expected in (('擦ら', '擦る'), ('食べら', '食べる'), ('読ま', '読む')):
+        cands = lookup_candidates(partial, db=db)
+        match = next((c for c in cands if c['word'] == expected), None)
+        assert match is not None, f'{partial} should complete to {expected}, got {[c["word"] for c in cands]}'
+        assert match['completed_from'] == partial, 'inflection completion must record completed_from'
+        print(f'ok inflection-completion {partial} -> {expected} (reasons={match["reasons"]})')
 
     # deinflected/literal match on the whole selection outranks any completion:
     # 食べ deinflects to 食べる (masu-stem) which must beat completions like 食べ物
