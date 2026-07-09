@@ -10,6 +10,9 @@ import sys
 
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), 'jmdict.sqlite')
 UNIT_SEP = '\x1f'  # matches build_jmdict_sqlite.py
+# Rank for a form JPDB has no entry for (lower = more common). Sorts unranked
+# forms last. Matches FREQUENCY_UNRANKED in build_jmdict_sqlite.py.
+UNRANKED = 9_999_999
 
 
 class JMdictUnavailable(Exception):
@@ -104,6 +107,28 @@ class JMdict:
             })
         return {'ent_seq': ent_seq, 'kanji': kanji,
                 'readings': readings, 'senses': senses}
+
+    def min_rank(self, forms):
+        '''Smallest JPDB frequency rank (lower = more common) among ``forms``
+        (an entry's kanji + readings), or ``UNRANKED`` if none are ranked.
+
+        Degrades to ``UNRANKED`` if the frequency table is absent (an old
+        jmdict.sqlite built before frequency ranking landed), so lookups keep
+        working -- they just fall back to insertion order within a tier.
+        '''
+        forms = [f for f in forms if f]
+        if not forms:
+            return UNRANKED
+        placeholders = ','.join('?' * len(forms))
+        try:
+            row = self.conn.execute(
+                f'SELECT MIN(rank) FROM frequency WHERE text IN ({placeholders})',
+                forms).fetchone()
+        except sqlite3.Error:
+            return UNRANKED
+        if row and row[0] is not None:
+            return row[0]
+        return UNRANKED
 
     def meta(self):
         '''Return the {key: value} build-provenance map (or {} if absent).'''

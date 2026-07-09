@@ -13,10 +13,10 @@ import sys
 # inside this directory (python3 lookup.py ...).
 try:
     from .deinflect import complete_partial_inflection, deinflect, rules_compatible
-    from .jmdict import JMdict
+    from .jmdict import UNRANKED, JMdict
 except ImportError:
     from deinflect import complete_partial_inflection, deinflect, rules_compatible
-    from jmdict import JMdict
+    from jmdict import UNRANKED, JMdict
 
 MAX_RESULTS = 16
 # When the whole selection finds nothing, retry on slightly shorter leading
@@ -55,7 +55,7 @@ def _flat_pos(senses):
     return list(seen.keys())
 
 
-def _candidate_entry(entry, reasons, matched_term, completed_from=None):
+def _candidate_entry(entry, reasons, matched_term, completed_from=None, rank=None):
     '''Shape a JMdict entry (+ the deinflection chain that found it) into the
     JSON-able dict that crosses the bridge and drives the popup / panel.
 
@@ -88,6 +88,9 @@ def _candidate_entry(entry, reasons, matched_term, completed_from=None):
         'senses': [{'pos': s['pos'], 'glosses': s['glosses']} for s in senses],
         'reasons': reasons,
         'completed_from': completed_from,
+        # JPDB corpus frequency rank (lower = more common); tiebreaker within a
+        # match tier, chiefly ordering the forward-completion tier jisho-style.
+        'rank': UNRANKED if rank is None else rank,
     }
 
 
@@ -104,7 +107,8 @@ def _collect_exact(db, surface, consider, force_tier=None):
                 tier = force_tier
             else:
                 tier = TIER_LITERAL if not d.reasons else TIER_DEINFLECTED
-            consider(tier, len(d.reasons), _candidate_entry(entry, d.reasons, d.term))
+            rank = db.min_rank(entry['kanji'] or entry['readings'])
+            consider(tier, len(d.reasons), _candidate_entry(entry, d.reasons, d.term, rank=rank))
 
 
 def _collect_prefix(db, surface, limit, consider):
@@ -115,13 +119,15 @@ def _collect_prefix(db, surface, limit, consider):
       * inflection completion — 擦ら  -> 擦る   (surface is a partial inflection)
     '''
     for entry in db.lookup_prefix(surface, limit):
-        consider(TIER_PREFIX, 0, _candidate_entry(entry, [], '', completed_from=surface))
+        rank = db.min_rank(entry['kanji'] or entry['readings'])
+        consider(TIER_PREFIX, 0, _candidate_entry(entry, [], '', completed_from=surface, rank=rank))
     for comp in complete_partial_inflection(surface):
         for entry in db.lookup_exact(comp.term):
             if not rules_compatible(comp.rules, _flat_pos(entry['senses'])):
                 continue
+            rank = db.min_rank(entry['kanji'] or entry['readings'])
             consider(TIER_PREFIX, len(comp.reasons),
-                     _candidate_entry(entry, comp.reasons, comp.term, completed_from=surface))
+                     _candidate_entry(entry, comp.reasons, comp.term, completed_from=surface, rank=rank))
 
 
 def lookup_candidates(selection, max_results=MAX_RESULTS, db=None, prefix_limit=PREFIX_LIMIT):
@@ -160,7 +166,10 @@ def lookup_candidates(selection, max_results=MAX_RESULTS, db=None, prefix_limit=
             if best:
                 break
 
-    ordered = sorted(best.values(), key=lambda t: (t[0], t[1]))
+    # Sort: match tier (primary) -> deinflection-chain length -> frequency rank.
+    # Frequency only ever reorders *within* a tier (chiefly the completion tier);
+    # it never lifts a lower tier above a higher one.
+    ordered = sorted(best.values(), key=lambda t: (t[0], t[1], t[2]['rank']))
     return [cand for _tier, _chain_len, cand in ordered][:max_results]
 
 
@@ -222,6 +231,17 @@ def _selftest():
     if completion_idxs:
         assert taberu_idx < min(completion_idxs), '食べる must rank above completions'
     print(f'ok 食べ -> 食べる ranks above completions ({[c["word"] for c in tabe][:6]})')
+
+    # frequency ranking: within the completion tier, common words come first
+    # (jisho shows 食べ物 high among 食べ's completions, not rare compounds)
+    tabe_completions = [c['word'] for c in lookup_candidates('食べ', db=db) if c['completed_from']]
+    if '食べ物' in tabe_completions:
+        rarer = ('食べ痩せ', '食べ掛け', '食べ初め')
+        present_rarer = [w for w in rarer if w in tabe_completions]
+        for w in present_rarer:
+            assert tabe_completions.index('食べ物') < tabe_completions.index(w), \
+                f'食べ物 should rank before {w}'
+        print(f'ok frequency orders completions: {tabe_completions[:5]}')
 
     # flood guard: a short common prefix stays capped at max_results
     flood = lookup_candidates('食べ', db=db, max_results=16)
