@@ -83,6 +83,9 @@ def _candidate_entry(entry, reasons, matched_term, completed_from=None):
         'pos': _flat_pos(senses),
         'meaning': _meaning_text(senses),
         'glosses': glosses,
+        # Per-sense structure preserved (unlike the flattened ``glosses``) so the
+        # Lookup side panel can number senses jisho-style; the popup ignores it.
+        'senses': [{'pos': s['pos'], 'glosses': s['glosses']} for s in senses],
         'reasons': reasons,
         'completed_from': completed_from,
     }

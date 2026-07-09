@@ -35,7 +35,7 @@ from qt.core import (
 )
 from qt.webengine import QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineView
 
-from calibre import prints, random_user_agent
+from calibre import prepare_string_for_xml, prints, random_user_agent
 from calibre.ebooks.metadata.sources.search_engines import google_consent_cookies
 from calibre.gui2 import error_dialog
 from calibre.gui2.viewer.web_view import apply_font_settings, vprefs
@@ -90,6 +90,14 @@ vprefs.defaults['lookup_locations'] = [
         'url':  'https://www.wordnik.com/words/{word}',
         'langs': ['eng'],
     },
+
+    {
+        # Offline: renders our own JMdict entries into the webview instead of
+        # loading a URL. See render_entries_html and update_query's kind branch.
+        'name': 'JMdict (offline)',
+        'kind': 'jmdict',
+        'langs': ['jpn'],
+    },
 ]
 vprefs.defaults['lookup_location'] = 'Google dictionary'
 vprefs.defaults['llm_lookup_tab_index'] = 0
@@ -101,10 +109,12 @@ class SourceEditor(Dialog):
         self.all_names = {x['name'] for x in parent.all_entries}
         self.initial_name = self.initial_url = None
         self.langs = []
+        self.initial_kind = 'web'
         if source_to_edit is not None:
-            self.langs = source_to_edit['langs']
+            self.langs = source_to_edit.get('langs', [])
             self.initial_name = source_to_edit['name']
-            self.initial_url = source_to_edit['url']
+            self.initial_url = source_to_edit.get('url')
+            self.initial_kind = source_to_edit.get('kind', 'web')
         Dialog.__init__(self, _('Edit lookup source'), 'viewer-edit-lookup-location', parent=parent)
         self.resize(self.sizeHint())
 
@@ -117,19 +127,36 @@ class SourceEditor(Dialog):
         if self.initial_name:
             n.setText(self.initial_name)
             n.setReadOnly(True)
+        self.kind_box = k = QComboBox(self)
+        k.addItem(_('Web page (URL template)'), 'web')
+        k.addItem(_('JMdict (offline dictionary)'), 'jmdict')
+        k.setCurrentIndex(max(0, k.findData(self.initial_kind)))
+        l.addRow(_('&Type:'), k)
         self.url_edit = u = QLineEdit(self)
         u.setPlaceholderText(_('The URL template of the source'))
         u.setMinimumWidth(n.minimumWidth())
         l.addRow(_('&URL:'), u)
         if self.initial_url:
             u.setText(self.initial_url)
-        la = QLabel(_(
+        self.url_help = la = QLabel(_(
             'The URL template must starts with https:// and have {word} in it which will be replaced by the actual query'))
         la.setWordWrap(True)
         l.addRow(la)
         l.addRow(self.bb)
+        k.currentIndexChanged.connect(self.update_url_enabled)
+        self.update_url_enabled()
         if self.initial_name:
             u.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def update_url_enabled(self):
+        ''' The JMdict source renders locally, so it needs no URL. '''
+        web = self.kind == 'web'
+        self.url_edit.setEnabled(web)
+        self.url_help.setEnabled(web)
+
+    @property
+    def kind(self):
+        return self.kind_box.currentData()
 
     @property
     def source_name(self):
@@ -147,19 +174,22 @@ class SourceEditor(Dialog):
         if not self.initial_name and q in self.all_names:
             return error_dialog(self, _('Name already exists'), _(
                 'A lookup source with the name {} already exists').format(q), show=True)
-        if not self.url:
-            return error_dialog(self, _('No name'), _(
-                'You must specify a URL'), show=True)
-        if not self.url.startswith('http://') and not self.url.startswith('https://'):
-            return error_dialog(self, _('Invalid URL'), _(
-                'The URL must start with https://'), show=True)
-        if '{word}' not in self.url:
-            return error_dialog(self, _('Invalid URL'), _(
-                'The URL must contain the placeholder {word}'), show=True)
+        if self.kind == 'web':
+            if not self.url:
+                return error_dialog(self, _('No URL'), _(
+                    'You must specify a URL'), show=True)
+            if not self.url.startswith('http://') and not self.url.startswith('https://'):
+                return error_dialog(self, _('Invalid URL'), _(
+                    'The URL must start with https://'), show=True)
+            if '{word}' not in self.url:
+                return error_dialog(self, _('Invalid URL'), _(
+                    'The URL must contain the placeholder {word}'), show=True)
         return Dialog.accept(self)
 
     @property
     def entry(self):
+        if self.kind == 'jmdict':
+            return {'name': self.source_name, 'kind': 'jmdict', 'langs': self.langs}
         return {'name': self.source_name, 'url': self.url, 'langs': self.langs}
 
 
@@ -220,7 +250,7 @@ class SourcesEditor(Dialog):
         d = SourceEditor(self, source_item.data(Qt.ItemDataRole.UserRole))
         if d.exec() == QDialog.DialogCode.Accepted:
             source_item.setData(Qt.ItemDataRole.UserRole, d.entry)
-            source_item.setData(Qt.ItemDataRole.DisplayRole, d.name)
+            source_item.setData(Qt.ItemDataRole.DisplayRole, d.source_name)
 
     @property
     def all_entries(self):
@@ -330,6 +360,82 @@ def blank_html():
     return html
 
 
+def _palette_colors():
+    ''' (bg, fg, muted, accent) from the app palette, so JMdict HTML matches the
+    viewer's light/dark theme (mirrors blank_html's approach). '''
+    pal = QApplication.instance().palette()
+    return (
+        pal.color(QPalette.ColorRole.Base).name(),
+        pal.color(QPalette.ColorRole.Text).name(),
+        pal.color(QPalette.ColorRole.PlaceholderText).name(),
+        pal.color(QPalette.ColorRole.Link).name(),
+    )
+
+
+def render_entries_html(candidates, query, max_entries=50):
+    ''' Render JMdict ``lookup_candidates`` output as a read-only, theme-aware
+    HTML page for the Lookup side panel (jisho-style: word 【reading】 + pos, an
+    optional annotation line for deinflection/completion, then numbered senses).
+    Text stays selectable -- that's default webview behavior. '''
+    bg, fg, muted, accent = _palette_colors()
+    esc = prepare_string_for_xml
+    css = f'''
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; padding: 0.5rem 0.6rem; background: {bg}; color: {fg};
+            font-family: sans-serif; line-height: 1.4; }}
+    .msg {{ color: {muted}; }}
+    .entry {{ padding: 0.55rem 0; border-bottom: 1px solid {muted}; }}
+    .entry:last-child {{ border-bottom: none; }}
+    .head {{ display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.45rem; }}
+    .word {{ font-size: 1.3rem; font-weight: 600; }}
+    .reading {{ color: {muted}; font-size: 1rem; }}
+    .pos {{ color: {muted}; font-size: 0.8rem; margin-left: auto; }}
+    .annot {{ color: {accent}; font-size: 0.85rem; margin: 0.2rem 0 0; }}
+    ol.senses {{ margin: 0.3rem 0 0; padding-left: 1.5rem; }}
+    ol.senses li {{ margin: 0.12rem 0; }}
+    '''
+    if not candidates:
+        body = '<p class="msg">{}</p>'.format(
+            esc(_('No JMdict entries for “{}”.').format(query)) if query
+            else esc(_("Double click on a word in the book's text to look it up.")))
+        return f'<!DOCTYPE html><html><head><meta charset="utf-8"><style>{css}</style></head><body>{body}</body></html>'
+
+    parts = []
+    for c in candidates[:max_entries]:
+        word = esc(c.get('word') or '')
+        reading = c.get('reading') or ''
+        reading_html = ''
+        if reading and reading != c.get('word'):
+            reading_html = f'<span class="reading">【{esc(reading)}】</span>'
+        pos = c.get('pos') or []
+        pos_html = f'<span class="pos">{esc(" · ".join(pos))}</span>' if pos else ''
+
+        # Annotation: a completion says where it was completed from; otherwise a
+        # deinflection shows its rule chain. (The completion's own rule name can
+        # be an arbitrary member of an ambiguous set, so we don't surface it.)
+        annot = ''
+        if c.get('completed_from'):
+            annot = _('completed from {}').format(c['completed_from'])
+        elif c.get('reasons'):
+            annot = ' '.join(c['reasons'])
+        annot_html = f'<div class="annot">← {esc(annot)}</div>' if annot else ''
+
+        senses = c.get('senses') or []
+        if senses:
+            lis = ''.join(f'<li>{esc("; ".join(s.get("glosses") or []))}</li>' for s in senses)
+        else:  # fall back to the flattened gloss list
+            lis = ''.join(f'<li>{esc(g)}</li>' for g in (c.get('glosses') or []))
+        senses_html = f'<ol class="senses">{lis}</ol>' if lis else ''
+
+        parts.append(
+            f'<div class="entry"><div class="head">'
+            f'<span class="word">{word}</span>{reading_html}{pos_html}</div>'
+            f'{annot_html}{senses_html}</div>')
+
+    body = ''.join(parts)
+    return f'<!DOCTYPE html><html><head><meta charset="utf-8"><style>{css}</style></head><body>{body}</body></html>'
+
+
 class Lookup(QTabWidget):
     add_note_requested = pyqtSignal(str, str)
 
@@ -345,6 +451,7 @@ class Lookup(QTabWidget):
         self.current_highlight_cache = None
         self.current_query = ''
         self.current_source = ''
+        self._jmdict_db = None  # lazily-opened, UI-thread-only sqlite connection
         self.llm_panel = None
         self.llm_tab_index = -1
         self.current_book_metadata = {}
@@ -504,7 +611,24 @@ class Lookup(QTabWidget):
     def url_template(self):
         idx = self.source_box.currentIndex()
         if idx > -1:
-            return self.source_box.itemData(idx)['url']
+            return self.source_box.itemData(idx).get('url')
+
+    @property
+    def source_kind(self):
+        s = self.source
+        return (s or {}).get('kind', 'web')
+
+    @property
+    def source_id(self):
+        ''' Identity used to detect when the shown result is stale. For web
+        sources that is the URL template; the JMdict source has no URL, so key
+        it by name. '''
+        s = self.source
+        if not s:
+            return None
+        if s.get('kind') == 'jmdict':
+            return 'jmdict:' + s['name']
+        return s.get('url')
 
     @property
     def special_processor(self):
@@ -515,7 +639,7 @@ class Lookup(QTabWidget):
     @property
     def query_is_up_to_date(self):
         query = self.selected_text or self.current_query
-        return self.current_query == query and self.current_source == self.url_template
+        return self.current_query == query and self.current_source == self.source_id
 
     def update_refresh_button_status(self):
         b = self.refresh_button
@@ -535,16 +659,38 @@ class Lookup(QTabWidget):
             query = self.selected_text or self.current_query
             if self.query_is_up_to_date or not query:
                 return
-            self.current_source = self.url_template
-            sp = self.special_processor
-            if sp is None:
-                url = self.current_source.format(word=query)
+            self.current_source = self.source_id
+            if self.source_kind == 'jmdict':
+                self.view.setHtml(self._jmdict_html(query))
             else:
-                url = sp(query)
-
-            self.view.load(QUrl(url))
+                sp = self.special_processor
+                if sp is None:
+                    url = self.url_template.format(word=query)
+                else:
+                    url = sp(query)
+                self.view.load(QUrl(url))
             self.current_query = query
             self.update_refresh_button_status()
+
+    def _jmdict_html(self, query):
+        ''' Look ``query`` up in the bundled offline JMdict and render it as HTML
+        for the webview. Runs on the GUI thread (called from update_query), which
+        is the only thread that touches the sqlite connection. '''
+        from calibre.gui2.viewer.anki_cards.jmdict import JMdict, JMdictUnavailable
+        from calibre.gui2.viewer.anki_cards.lookup import lookup_candidates
+        try:
+            if self._jmdict_db is None:
+                self._jmdict_db = JMdict()
+            candidates = lookup_candidates(query, db=self._jmdict_db)
+        except JMdictUnavailable:
+            bg, fg, muted, accent = _palette_colors()
+            return (f'<body style="background:{bg};color:{fg};font-family:sans-serif;padding:0.6rem">'
+                    f'<p>{prepare_string_for_xml(_("The offline JMdict database is not available."))}</p></body>')
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            candidates = []
+        return render_entries_html(candidates, query)
 
     def _find_highlight_by_uuid(self, uuid):
         if not uuid or not self.viewer:
