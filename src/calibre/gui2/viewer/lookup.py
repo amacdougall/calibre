@@ -478,6 +478,18 @@ class Lookup(QTabWidget):
     def _create_dictionary_panel(self):
         panel = QWidget(self)
         l = QVBoxLayout(panel)
+
+        # Editable query field: the single source of truth for the lookup term.
+        # A book selection writes into it (see selected_text_changed) and so does
+        # the user; update_query always reads from here. This lets you fix up a
+        # selection that the book split with punctuation before looking it up.
+        self.query_edit = qe = QLineEdit(self)
+        qe.setPlaceholderText(_('Type a word to look up, or select text in the book'))
+        qe.setClearButtonEnabled(True)
+        qe.textChanged.connect(self._on_query_edited)
+        qe.returnPressed.connect(self.update_query)
+        l.addWidget(qe)
+
         h = QHBoxLayout()
         l.addLayout(h)
 
@@ -500,7 +512,7 @@ class Lookup(QTabWidget):
         b.clicked.connect(self.add_sources)
         self.refresh_button = rb = QPushButton(QIcon.ic('view-refresh.png'), _('Refresh'))
         rb.setToolTip(_('Refresh the result to match the currently selected text'))
-        rb.clicked.connect(self.update_query)
+        rb.clicked.connect(self.refresh_clicked)
 
         h_bottom = QHBoxLayout()
         l.addLayout(h_bottom)
@@ -637,14 +649,28 @@ class Lookup(QTabWidget):
             return special_processors.get(self.source_box.itemData(idx).get('special_processor'))
 
     @property
-    def query_is_up_to_date(self):
-        query = self.selected_text or self.current_query
-        return self.current_query == query and self.current_source == self.source_id
+    def query_text(self):
+        ' The effective lookup term: whatever is in the editable query field. '
+        return self.query_edit.text().strip()
 
     def update_refresh_button_status(self):
+        # The query field drives lookups live (debounced), so Refresh only has a
+        # job when auto-update is off: pull the current book selection into the
+        # field. Enable it when there is a selection not already shown there.
         b = self.refresh_button
         b.setVisible(not self.auto_update_query.isChecked())
-        b.setEnabled(not self.query_is_up_to_date)
+        b.setEnabled(bool(self.selected_text) and self.selected_text != self.query_text)
+
+    def _on_query_edited(self):
+        ' The query field changed (user typing or a programmatic selection push). '
+        self.update_refresh_button_status()
+        self.debounce_timer.start()
+
+    def refresh_clicked(self):
+        ' Pull the current selection into the field, then look it up. '
+        if self.selected_text:
+            self.query_edit.setText(self.selected_text)
+        self.update_query()
 
     def update_query(self):
         self.debounce_timer.stop()
@@ -655,22 +681,26 @@ class Lookup(QTabWidget):
         if current_idx == self.llm_tab_index:
             if self.llm_panel:
                 self.llm_panel.update_with_text(self.selected_text)
-        else:
-            query = self.selected_text or self.current_query
-            if self.query_is_up_to_date or not query:
-                return
-            self.current_source = self.source_id
-            if self.source_kind == 'jmdict':
-                self.view.setHtml(self._jmdict_html(query))
-            else:
-                sp = self.special_processor
-                if sp is None:
-                    url = self.url_template.format(word=query)
-                else:
-                    url = sp(query)
-                self.view.load(QUrl(url))
-            self.current_query = query
+            return
+
+        query = self.query_text
+        if not query:
             self.update_refresh_button_status()
+            return
+        if self.current_query == query and self.current_source == self.source_id:
+            return
+        self.current_source = self.source_id
+        if self.source_kind == 'jmdict':
+            self.view.setHtml(self._jmdict_html(query))
+        else:
+            sp = self.special_processor
+            if sp is None:
+                url = self.url_template.format(word=query)
+            else:
+                url = sp(query)
+            self.view.load(QUrl(url))
+        self.current_query = query
+        self.update_refresh_button_status()
 
     def _jmdict_html(self, query):
         ''' Look ``query`` up in the bundled offline JMdict and render it as HTML
@@ -734,8 +764,12 @@ class Lookup(QTabWidget):
         if self.selected_text and self.currentIndex() == self.llm_tab_index:
             self.viewer_parent.web_view.generic_action('suppress-selection-popup', True)
 
-        if not self.disallow_auto_update and self.auto_update_query.isChecked():
-            self.debounce_timer.start()
+        # When auto-update is on, feed the selection into the query field; its
+        # textChanged handler debounces the actual lookup. When off, we leave the
+        # field alone so a hand-edited query survives new selections (Refresh
+        # pulls the selection in on demand).
+        if self.selected_text and not self.disallow_auto_update and self.auto_update_query.isChecked():
+            self.query_edit.setText(self.selected_text)
 
         self.update_refresh_button_status()
         if self.llm_panel:
