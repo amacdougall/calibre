@@ -457,7 +457,7 @@ class Lookup(QTabWidget):
         self.current_book_metadata = {}
 
         self.debounce_timer = t = QTimer(self)
-        t.setInterval(150), t.timeout.connect(self.update_query)
+        t.setInterval(500), t.timeout.connect(self.update_query)
 
         self.dictionary_panel = self._create_dictionary_panel()
         self.addTab(self.dictionary_panel, QIcon.ic('dialog_question.png'), _('&Dictionary'))

@@ -343,6 +343,9 @@ class View:
         self.modal_overlays = v'[self.selection_bar, self.read_aloud, self.hints, self.read_audio_ebook]'
         self.processing_spine_item_display = False
         self.pending_load = None
+        # request_id -> fn(candidates, word) that refreshes an open Anki popup's
+        # candidate list when Python answers a re-lookup (see show_anki_candidates).
+        self._anki_candidate_updaters = {}
         self.currently_showing = {'selection': {'empty': True}, 'on_load':v'[]'}
         self.book_scrollbar.apply_visibility()
         self.annotations_manager = AnnotationsManager(self)
@@ -362,32 +365,48 @@ class View:
 
     def show_anki_candidates(self, request_id, candidates, raw_word):
         # Python looked the selection up in JMdict and pushed the candidate
-        # dictionary entries here. Show them in a modal; the user's pick (or a
-        # cancel) is reported straight back to Python via choose_anki_candidate.
-        state = {'done': False}
+        # dictionary entries here. Show them in a modal with an editable word
+        # field at the top: editing it re-runs the lookup in Python (debounced),
+        # refreshing the list, while the sentence -- captured once when the popup
+        # was invoked -- stays fixed. The user's pick (or a cancel) is reported
+        # straight back to Python via choose_anki_candidate.
+        state = {'done': False, 'candidates': candidates, 'timer': None}
+        input_id = unique_id('anki-word')
+        list_container = E.div()
+        hold = {'close': None}
 
-        def choose(entry, close_modal):
+        def current_word():
+            inp = document.getElementById(input_id)
+            return (inp.value if inp else raw_word).strip()
+
+        def first_entry():
+            # Enter accepts the top JMdict candidate; with none, mine the raw word.
+            if state.candidates and state.candidates.length:
+                return state.candidates[0]
+            return {'word': current_word(), 'reading': '', 'meaning': ''}
+
+        def cleanup():
+            if state.timer:
+                window.clearTimeout(state.timer)
+                state.timer = None
+            v'delete self._anki_candidate_updaters[request_id]'
+
+        def finish(entry):
+            # Report the user's pick and close. Guarded so the modal's own
+            # on_close (fired by close_modal) does not also send a cancel.
+            if state.done:
+                return
             state.done = True
+            cleanup()
             if ui_operations.choose_anki_candidate:
                 ui_operations.choose_anki_candidate(request_id, entry)
-            close_modal()
+            if hold.close:
+                hold.close()
 
-        def on_close(ev):
-            # Fires on Escape / close button too; tell Python to drop the
-            # pending request if nothing was picked.
-            if not state.done:
-                state.done = True
-                if ui_operations.choose_anki_candidate:
-                    ui_operations.choose_anki_candidate(request_id, None)
-
-        # Always offer mining the raw selection verbatim, so a bad
-        # deinflection or a no-match never blocks the user.
-        raw_entry = {'word': raw_word, 'reading': '', 'meaning': ''}
-        first_entry = candidates[0] if candidates and candidates.length else raw_entry
-
-        def content(parent, close_modal):
+        def render():
+            clear(list_container)
             items = v'[]'
-            for entry in candidates:
+            for entry in state.candidates:
                 title = entry.word or entry.reading or ''
                 if entry.reading and entry.reading is not entry.word:
                     title = title + ' 【' + entry.reading + '】'
@@ -398,13 +417,63 @@ class View:
                     subtitle = entry.pos.join(', ')
                 if entry.meaning:
                     subtitle = (subtitle + ' · ' if subtitle else '') + entry.meaning
-                items.push(create_item(title, choose.bind(None, entry, close_modal), subtitle))
+                items.push(create_item(title, finish.bind(None, entry), subtitle))
+            # Always offer mining the current word verbatim, so a bad
+            # deinflection or a no-match never blocks the user.
+            raw = current_word()
             items.push(create_item(
-                _('Mine raw selection:') + ' ' + raw_word,
-                choose.bind(None, raw_entry, close_modal)))
-            create_item_list(parent, items)
+                _('Mine raw selection:') + ' ' + raw,
+                finish.bind(None, {'word': raw, 'reading': '', 'meaning': ''})))
+            create_item_list(list_container, items)
+
+        def relookup():
+            state.timer = None
+            if ui_operations.relookup_anki_candidates:
+                ui_operations.relookup_anki_candidates(request_id, current_word())
+
+        def on_input(ev):
+            if state.timer:
+                window.clearTimeout(state.timer)
+            state.timer = window.setTimeout(relookup, 500)
+
+        def apply_update(new_candidates, word):
+            # Drop a response for a word the user has already typed past (a newer
+            # relookup is pending), so stale results never flash into the list.
+            if word is not current_word():
+                return
+            state.candidates = new_candidates
+            render()
+        self._anki_candidate_updaters[request_id] = apply_update
+
+        def on_close(ev):
+            # Fires on Escape / close button / backdrop too; tell Python to drop
+            # the pending request if nothing was picked.
+            if not state.done:
+                state.done = True
+                cleanup()
+                if ui_operations.choose_anki_candidate:
+                    ui_operations.choose_anki_candidate(request_id, None)
+
+        def content(parent, close_modal):
+            hold.close = close_modal
+            parent.appendChild(E.div(
+                E.input(type='text', id=input_id, value=raw_word,
+                        placeholder=_('Word to look up'),
+                        style='width:100%; max-width:100%; box-sizing:border-box; margin-bottom:1ex; padding:0.4ex 0.5ex',
+                        oninput=on_input),
+                list_container,
+            ))
+            render()
+            window.setTimeout(def():
+                inp = document.getElementById(input_id)
+                if inp:
+                    inp.focus()
+                    inp.setSelectionRange(inp.value.length, inp.value.length)
+            , 10)
 
         def on_keydown(event, close_modal):
+            if event.isComposing:  # let the IME consume Enter while composing kana
+                return
             if event.altKey or event.ctrlKey or event.metaKey or event.shiftKey:
                 return
             if event.key is 'Escape' or event.key is 'Esc':
@@ -413,10 +482,15 @@ class View:
                 close_modal()
             elif event.key is 'Enter':
                 event.preventDefault(), event.stopPropagation()
-                choose(first_entry, close_modal)
+                finish(first_entry())
 
-        title = _('Add to Anki') + ' — ' + raw_word
-        create_custom_dialog(title, content, on_close, onkeydown=on_keydown)
+        create_custom_dialog(_('Add to Anki'), content, on_close, onkeydown=on_keydown)
+
+    def update_anki_candidates(self, request_id, candidates, word):
+        # Python answered an edited-word re-lookup; refresh the open popup's list.
+        updater = self._anki_candidate_updaters[request_id]
+        if updater:
+            updater(candidates, word)
 
     def show_not_a_library_book_error(self):
         error_dialog(_('Not a calibre library book'), _(

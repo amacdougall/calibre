@@ -321,6 +321,11 @@ def show_anki_candidates(request_id, candidates, raw_word):
 
 
 @from_python
+def update_anki_candidates(request_id, candidates, word):
+    return view.update_anki_candidates(request_id, candidates, word)
+
+
+@from_python
 def full_screen_state_changed(viewer_in_full_screen):
     runtime.viewer_in_full_screen = viewer_in_full_screen
 
@@ -482,6 +487,8 @@ if window is window.top:
         to_python.report_anki_sentence(word, sentence)
     ui_operations.choose_anki_candidate = def(request_id, entry):
         to_python.choose_anki_candidate(request_id, entry)
+    ui_operations.relookup_anki_candidates = def(request_id, word):
+        to_python.relookup_anki_candidates(request_id, word)
     ui_operations.view_image = def(name):
         to_python.view_image(name)
     ui_operations.copy_image = def(name):

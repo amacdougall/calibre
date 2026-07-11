@@ -212,6 +212,7 @@ class EbookViewer(MainWindow):
         self._anki_next_request_id = 0
         self.web_view.report_anki_sentence.connect(self.on_anki_selection, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.choose_anki_candidate.connect(self.add_to_anki, type=Qt.ConnectionType.QueuedConnection)
+        self.web_view.relookup_anki_candidates.connect(self.on_relookup_anki_candidates, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.show_loading_message.connect(self.show_loading_message)
         self.web_view.show_error.connect(self.show_error)
         self.web_view.print_book.connect(self.print_book, type=Qt.ConnectionType.QueuedConnection)
@@ -461,6 +462,23 @@ class EbookViewer(MainWindow):
         self._anki_next_request_id += 1
         self._anki_pending[request_id] = {'sentence': sentence, 'word': word}
         self.web_view.execute_when_ready('show_anki_candidates', request_id, candidates, word)
+
+    def on_relookup_anki_candidates(self, request_id, word):
+        # The user edited the word in the Anki popup. Re-run the JMdict lookup and
+        # push the refreshed candidates back to the still-open popup. The stashed
+        # sentence (captured at invocation, in _anki_pending) is left untouched, so
+        # editing the word never changes the sentence the card will get.
+        word = (word or '').strip()
+        candidates = []
+        if word:
+            try:
+                from calibre.gui2.viewer.anki_cards.lookup import lookup_candidates
+                candidates = lookup_candidates(word)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                candidates = []
+        self.web_view.execute_when_ready('update_anki_candidates', str(request_id), candidates, word)
 
     def add_to_anki(self, request_id, chosen_entry):
         # Second half: the user picked a candidate (or the raw-selection fallback)
