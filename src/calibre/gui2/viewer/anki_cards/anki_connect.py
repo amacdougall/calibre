@@ -109,12 +109,19 @@ class AnkiConnect:
 
 
 def build_note(deck_name, model_name, fields, tags=None,
-               allow_duplicate=False, duplicate_scope='deck'):
+               allow_duplicate=False, duplicate_scope=None):
     '''Construct an AnkiConnect note object.
 
     ``fields`` is a ``{field_name: value}`` mapping. ``duplicate_scope`` of
-    ``'deck'`` makes duplicate detection deck-local (matching the reference
-    project's per-deck dedup), rather than collection-wide.
+    ``None`` (the default) makes duplicate detection collection-wide: a word is
+    reported as already in Anki if a note of this type exists in *any* deck, not
+    just the target deck. This suits mining vocab across many source decks that
+    share one note type. Pass ``'deck'`` to restrict dedup to the target deck.
+
+    Note: with collection-wide scope AnkiConnect uses Anki's native
+    ``dupeOrEmpty``, which only matches within the *same note type* (keyed on the
+    first field). That is exactly what we want here, since all the vocab notes
+    use one type.
     '''
     return {
         'deckName': deck_name,
