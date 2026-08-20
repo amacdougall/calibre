@@ -417,6 +417,10 @@ class MainOverlay:  # {{{
                 copy_actions.appendChild(ac(_('Copy image'), _('Copy the current image'), def():
                     self.overlay.hide(), ui_operations.copy_image(self.elements.img)
                 , 'copy'))
+                copy_actions.appendChild(ac(_('Invert image colors'), _(
+                    'Invert the colors of this image, useful for diagrams that clash with the color scheme'), def():
+                    self.overlay.hide(), self.overlay.view.toggle_invert_image(self.elements.img)
+                , 'bg'))
             if copy_actions.childNodes.length:
                 actions_div.appendChild(copy_actions)
 
@@ -457,6 +461,10 @@ class MainOverlay:  # {{{
                     copy_actions.appendChild(ac(_('Copy image'), _('Copy the current image'), def():
                         self.overlay.hide(), ui_operations.copy_image(self.elements.img)
                     , 'copy'))
+                copy_actions.appendChild(ac(_('Invert image colors'), _(
+                    'Invert the colors of this image, useful for diagrams that clash with the color scheme'), def():
+                    self.overlay.hide(), self.overlay.view.toggle_invert_image(self.elements.img)
+                , 'bg'))
             if copy_actions.childNodes.length:
                 actions_div.appendChild(copy_actions)
 

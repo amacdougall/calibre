@@ -800,6 +800,9 @@ class View:
     def toggle_autoscroll(self):
         self.iframe_wrapper.send_message('toggle_autoscroll')
 
+    def toggle_invert_image(self, calibre_src):
+        self.iframe_wrapper.send_message('toggle_invert_image', calibre_src=calibre_src)
+
     def toggle_toolbar(self):
         sd = get_session_data()
         misc = sd.get('standalone_misc_settings')
