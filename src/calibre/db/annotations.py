@@ -31,6 +31,12 @@ def highlight_sort_key(hl):
     return no_cfi_sort_key
 
 
+def image_invert_sort_key(ii):
+    # image inversion applies to a resource wherever it appears in the book,
+    # not to a single position, so there is no meaningful position to sort by
+    return no_cfi_sort_key
+
+
 def annotations_as_copied_list(annots_map):
     for atype, annots in annots_map.items():
         for annot in annots:
@@ -41,7 +47,9 @@ def annotations_as_copied_list(annots_map):
 
 
 def sort_annot_list_by_position_in_book(annots, annot_type):
-    annots.sort(key={'bookmark': bookmark_sort_key, 'highlight': highlight_sort_key}[annot_type])
+    annots.sort(key={
+        'bookmark': bookmark_sort_key, 'highlight': highlight_sort_key, 'image_invert': image_invert_sort_key,
+    }[annot_type])
 
 
 def merge_annots_with_identical_field(a, b, field='title'):
@@ -66,7 +74,7 @@ def merge_annots_with_identical_field(a, b, field='title'):
     return changed, ans
 
 
-merge_field_map = {'bookmark': 'title', 'highlight': 'uuid'}
+merge_field_map = {'bookmark': 'title', 'highlight': 'uuid', 'image_invert': 'calibre_src'}
 
 
 def merge_annot_lists(a, b, annot_type):
@@ -141,4 +149,6 @@ def annot_db_data(annot):
         notes = annot.get('notes') or ''
         if notes:
             text += '\n\x1f\n' + notes
+    elif atype == 'image_invert':
+        aid = annot['calibre_src']
     return aid, unicode_normalize(text)

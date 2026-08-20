@@ -286,6 +286,7 @@ class ViewerBridge(Bridge):
     scrollbar_context_menu = from_js(object, object, object)
     close_prep_finished = from_js(object)
     highlights_changed = from_js(object)
+    image_invert_changed = from_js(object)
     open_url = from_js(object)
     speak_simple_text = from_js(object)
     tts = from_js(object, object)
@@ -506,6 +507,7 @@ class WebView(QWebEngineView):
     scrollbar_context_menu = pyqtSignal(object, object, object)
     close_prep_finished = pyqtSignal(object)
     highlights_changed = pyqtSignal(object)
+    image_invert_changed = pyqtSignal(object)
     update_reading_rates = pyqtSignal(object)
     reset_reading_rates = pyqtSignal()
     edit_book = pyqtSignal(object, object, object)
@@ -578,6 +580,7 @@ class WebView(QWebEngineView):
         self.bridge.scrollbar_context_menu.connect(self.scrollbar_context_menu)
         self.bridge.close_prep_finished.connect(self.close_prep_finished)
         self.bridge.highlights_changed.connect(self.highlights_changed)
+        self.bridge.image_invert_changed.connect(self.image_invert_changed)
         self.bridge.update_reading_rates.connect(self.update_reading_rates)
         self.bridge.reset_reading_rates.connect(self.reset_reading_rates)
         self.bridge.profile_op.connect(self.profile_op)
@@ -714,12 +717,12 @@ class WebView(QWebEngineView):
         self.current_content_file = data
         self.content_file_changed.emit(self.current_content_file)
 
-    def start_book_load(self, initial_position=None, highlights=None, current_book_data=None, reading_rates=None):
+    def start_book_load(self, initial_position=None, highlights=None, image_inverts=None, current_book_data=None, reading_rates=None):
         key = (set_book_path.path,)
         book_url = link_prefix_for_location_links(add_open_at=False)
         book_in_library_url = url_for_book_in_library()
         self.execute_when_ready(
-            'start_book_load', key, initial_position, set_book_path.pathtoebook, highlights or [], book_url,
+            'start_book_load', key, initial_position, set_book_path.pathtoebook, highlights or [], image_inverts or [], book_url,
             reading_rates, book_in_library_url)
 
     def execute_when_ready(self, action, *args):

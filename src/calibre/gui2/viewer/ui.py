@@ -222,6 +222,7 @@ class EbookViewer(MainWindow):
         self.web_view.scrollbar_context_menu.connect(self.scrollbar_context_menu)
         self.web_view.close_prep_finished.connect(self.close_prep_finished)
         self.web_view.highlights_changed.connect(self.highlights_changed)
+        self.web_view.image_invert_changed.connect(self.image_invert_changed)
         self.web_view.update_reading_rates.connect(self.update_reading_rates)
         self.web_view.reset_reading_rates.connect(self.reset_reading_rates)
         self.web_view.edit_book.connect(self.edit_book)
@@ -758,8 +759,11 @@ class EbookViewer(MainWindow):
                 initial_position = {'type': 'bookpos', 'data': float(open_at)}
         highlights = self.current_book_data['annotations_map']['highlight']
         self.highlights_widget.load(highlights)
+        image_inverts = self.current_book_data['annotations_map']['image_invert']
         rates = load_reading_rates(self.current_book_data['annotations_path_key'])
-        self.web_view.start_book_load(initial_position=initial_position, highlights=highlights, current_book_data=self.current_book_data, reading_rates=rates)
+        self.web_view.start_book_load(
+            initial_position=initial_position, highlights=highlights, image_inverts=image_inverts,
+            current_book_data=self.current_book_data, reading_rates=rates)
         performance_monitor('webview loading requested')
 
         self.lookup_widget.book_loaded(self.current_book_data)
@@ -1002,6 +1006,15 @@ class EbookViewer(MainWindow):
             master_map = self.current_book_data.setdefault('annotations_map', {})
             master_map['highlight'] = changed_annotations
             self.highlights_widget.load(changed_annotations)
+            self.save_annotations()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    def image_invert_changed(self, changed_annotations: list):
+        try:
+            master_map = self.current_book_data.setdefault('annotations_map', {})
+            master_map['image_invert'] = changed_annotations
             self.save_annotations()
         except Exception:
             import traceback

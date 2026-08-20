@@ -164,7 +164,6 @@ class IframeBoss:
         self.last_window_width = self.last_window_height = -1
         self.forward_keypresses = False
         self.full_book_search_in_progress = None
-        self.inverted_image_srcs = {}
         set_boss(self)
         handlers = {
             'change_color_scheme': self.change_color_scheme,
@@ -289,8 +288,6 @@ class IframeBoss:
         clear_annot_id_uuid_map()
         reset_highlight_counter()
         set_toc_anchor_map()
-        if JSON.stringify(data.book?.key) is not JSON.stringify(self.book?.key):
-            self.inverted_image_srcs = {}
         self.replace_history_on_next_cfi_update = True
         self.book = current_book.book = data.book
         self.smil_map = data.smil_map
@@ -345,6 +342,7 @@ class IframeBoss:
         document.body.style.removeProperty('font-family')
         root_data, self.mathjax, self.blob_url_map = finalize_resources(self.book, data.name, data.resource_data)
         self.highlights_to_apply = data.highlights
+        self.image_inverts_to_apply = data.image_inverts
         unserialize_html(root_data, self.content_loaded, None, data.name)
 
     def on_scroll_to_frac(self, data):
@@ -477,7 +475,10 @@ class IframeBoss:
         if self.highlights_to_apply:
             self.apply_highlights_on_load(self.highlights_to_apply)
             self.highlights_to_apply = None
-        self.reapply_inverted_images()
+        if self.image_inverts_to_apply:
+            for calibre_src in self.image_inverts_to_apply:
+                self.apply_invert_to_image_elements(calibre_src, True)
+            self.image_inverts_to_apply = None
         apply_settings()
         invalidate_anchor_position_cache()
         fix_fullscreen_svg_images()
@@ -779,20 +780,11 @@ class IframeBoss:
                 img.style.removeProperty('filter')
 
     def toggle_invert_image(self, data):
-        calibre_src = data.calibre_src
-        if not calibre_src:
+        # the parent frame owns the persisted inverted/not-inverted state (so it
+        # can sync it as an annotation); it tells us the resulting state here
+        if not data.calibre_src:
             return
-        if self.inverted_image_srcs[calibre_src]:
-            v'delete self.inverted_image_srcs[calibre_src]'
-            inverted = False
-        else:
-            self.inverted_image_srcs[calibre_src] = True
-            inverted = True
-        self.apply_invert_to_image_elements(calibre_src, inverted)
-
-    def reapply_inverted_images(self):
-        for calibre_src in Object.keys(self.inverted_image_srcs):
-            self.apply_invert_to_image_elements(calibre_src, True)
+        self.apply_invert_to_image_elements(data.calibre_src, v'!!data.inverted')
 
     def link_activated(self, evt):
         try:

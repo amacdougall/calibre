@@ -133,7 +133,7 @@ def show_error(title, msg, details):
     to_python.show_error(title, msg, details)
 
 
-def manifest_received(key, initial_position, pathtoebook, highlights, book_url, reading_rates, book_in_library_url, end_type, xhr, ev):
+def manifest_received(key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url, end_type, xhr, ev):
     nonlocal book
     end_type = workaround_qt_bug(xhr, end_type)
     if end_type is 'load':
@@ -143,6 +143,7 @@ def manifest_received(key, initial_position, pathtoebook, highlights, book_url, 
         book.metadata = book.manifest.metadata = data[1]
         book.manifest.pathtoebook = pathtoebook
         book.highlights = highlights
+        book.image_inverts = image_inverts
         book.stored_files = {}
         book.calibre_book_url = book_url
         book.calibre_book_in_library_url = book_in_library_url
@@ -294,8 +295,8 @@ def redraw_tts_bar(pos):
 
 
 @from_python
-def start_book_load(key, initial_position, pathtoebook, highlights, book_url, reading_rates, book_in_library_url):
-    xhr = ajax('manifest', manifest_received.bind(None, key, initial_position, pathtoebook, highlights, book_url, reading_rates, book_in_library_url), ok_code=0)
+def start_book_load(key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url):
+    xhr = ajax('manifest', manifest_received.bind(None, key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url), ok_code=0)
     xhr.responseType = 'json'
     xhr.send()
 
@@ -526,6 +527,8 @@ if window is window.top:
     ui_operations.annots_changed = def(amap):
         if amap.highlight:
             to_python.highlights_changed(amap.highlight)
+        if amap.image_invert:
+            to_python.image_invert_changed(amap.image_invert)
     ui_operations.speak_simple_text = def(text):
         to_python.speak_simple_text(text)
     ui_operations.tts = def(action, data):

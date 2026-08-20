@@ -801,7 +801,8 @@ class View:
         self.iframe_wrapper.send_message('toggle_autoscroll')
 
     def toggle_invert_image(self, calibre_src):
-        self.iframe_wrapper.send_message('toggle_invert_image', calibre_src=calibre_src)
+        inverted = self.annotations_manager.toggle_image_invert(calibre_src)
+        self.iframe_wrapper.send_message('toggle_invert_image', calibre_src=calibre_src, inverted=inverted)
 
     def toggle_toolbar(self):
         sd = get_session_data()
@@ -1121,18 +1122,23 @@ class View:
         unkey = username_key(get_interface_data().username)
         self.book = current_book.book = book
         hl = None
+        image_inverts = None
         if not is_redisplay:
             if self.read_audio_ebook:
                 self.read_audio_ebook.hide()
                 clear(self.read_audio_ebook.container)
             if runtime.is_standalone_viewer:
                 hl = book.highlights
+                image_inverts = book.image_inverts
                 v'delete book.highlights'
+                v'delete book.image_inverts'
             else:
                 if unkey and book.annotations_map[unkey]:
                     hl = book.annotations_map[unkey].highlight
+                    image_inverts = book.annotations_map[unkey].image_invert
                     self.annotations_manager.set_bookmarks(book.annotations_map[unkey].bookmark or v'[]')
             self.annotations_manager.set_highlights(hl or v'[]')
+            self.annotations_manager.set_image_inverts(image_inverts or v'[]')
             if runtime.is_standalone_viewer:
                 add_book_to_recently_viewed(book)
         if ui_operations.update_last_read_time:
@@ -1602,6 +1608,7 @@ class View:
             settings=self.currently_showing.settings, reference_mode_enabled=self.reference_mode_enabled,
             is_titlepage=self.currently_showing.name is self.book.manifest.title_page_name,
             highlights=self.annotations_manager.highlights_for_currently_showing(),
+            image_inverts=self.annotations_manager.all_inverted_image_srcs(),
         )
 
     def on_content_loaded(self, data):
