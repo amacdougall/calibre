@@ -4,6 +4,7 @@ from __python__ import hash_literals
 
 from elementmaker import E
 
+from book_list.theme import color_to_rgba
 from read_book.globals import dark_link_color, runtime
 from session import session_defaults
 
@@ -63,6 +64,7 @@ def apply_colors(is_content_popup):
     des.setProperty('--calibre-viewer-background-color', opts.color_scheme.background)
     des.setProperty('--calibre-viewer-foreground-color', opts.color_scheme.foreground)
     des.colorScheme = 'dark' if opts.is_dark_theme else 'light'
+    update_image_invert_filter()
     if opts.color_scheme.link:
         des.setProperty('--calibre-viewer-link-color', opts.color_scheme.link)
     for elem in (document.documentElement, document.body):
@@ -188,6 +190,47 @@ def set_selection_style(style):
     for rule in sheet.sheet.cssRules:
         if rule.type is rule.STYLE_RULE and rule.selectorText.indexOf('selection') > -1:
             rule.style.cssText = css_text
+
+
+IMAGE_INVERT_FILTER_ID = 'calibre-image-invert-filter'
+SVG_NS = 'http://www.w3.org/2000/svg'
+
+
+def create_image_invert_filter():
+    svg = document.createElementNS(SVG_NS, 'svg')
+    svg.setAttribute('aria-hidden', 'true')
+    svg.setAttribute('focusable', 'false')
+    svg.style.cssText = 'position: absolute; width: 0; height: 0; overflow: hidden'
+    filt = document.createElementNS(SVG_NS, 'filter')
+    filt.setAttribute('id', IMAGE_INVERT_FILTER_ID)
+    filt.setAttribute('color-interpolation-filters', 'sRGB')
+    ct = document.createElementNS(SVG_NS, 'feComponentTransfer')
+    for tag in ('feFuncR', 'feFuncG', 'feFuncB'):
+        func = document.createElementNS(SVG_NS, tag)
+        func.setAttribute('type', 'linear')
+        ct.appendChild(func)
+    filt.appendChild(ct)
+    svg.appendChild(filt)
+    document.documentElement.appendChild(svg)
+    return filt
+
+
+def update_image_invert_filter():
+    # A single linear component transfer that both inverts and raises the
+    # resulting black floor to the color scheme's background level, so an
+    # inverted white-background diagram blends with (rather than punches a
+    # black hole through) a dark-but-not-black background. For input x and
+    # background floor f (both in 0..1): output = 1 - (1 - f) * x, i.e.
+    # black ink (x=0) still maps to white, but white paper (x=1) maps to f
+    # instead of 0.
+    rgba = color_to_rgba(opts.color_scheme.background)
+    filt = document.getElementById(IMAGE_INVERT_FILTER_ID) or create_image_invert_filter()
+    funcs = filt.firstChild.childNodes
+    for i in range(3):
+        floor = rgba[i] / 255
+        func = funcs[i]
+        func.setAttribute('slope', f'{-(1 - floor)}')
+        func.setAttribute('intercept', '1')
 
 
 def set_color_scheme_class():

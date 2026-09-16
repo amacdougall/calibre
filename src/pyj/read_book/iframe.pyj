@@ -81,6 +81,7 @@ from read_book.paged_mode import start_drag_scroll as start_drag_scroll_paged
 from read_book.referencing import elem_for_ref, end_reference_mode, start_reference_mode
 from read_book.resources import finalize_resources, unserialize_html
 from read_book.settings import (
+    IMAGE_INVERT_FILTER_ID,
     apply_colors,
     apply_font_size,
     apply_settings,
@@ -475,11 +476,11 @@ class IframeBoss:
         if self.highlights_to_apply:
             self.apply_highlights_on_load(self.highlights_to_apply)
             self.highlights_to_apply = None
+        apply_settings()  # must run before applying image inverts, it creates the invert filter
         if self.image_inverts_to_apply:
             for calibre_src in self.image_inverts_to_apply:
                 self.apply_invert_to_image_elements(calibre_src, True)
             self.image_inverts_to_apply = None
-        apply_settings()
         invalidate_anchor_position_cache()
         fix_fullscreen_svg_images()
         self.do_layout(self.is_titlepage)
@@ -775,7 +776,11 @@ class IframeBoss:
     def apply_invert_to_image_elements(self, calibre_src, inverted):
         for img in self.find_image_elements(calibre_src):
             if inverted:
-                img.style.setProperty('filter', 'invert(1)', 'important')
+                # invert, but with the resulting black floor raised to the
+                # color scheme's background level (see update_image_invert_filter)
+                # rather than a flat filter: invert(1), so the image blends into
+                # a dark-gray (rather than pure black) background
+                img.style.setProperty('filter', f'url(#{IMAGE_INVERT_FILTER_ID})', 'important')
             else:
                 img.style.removeProperty('filter')
 
