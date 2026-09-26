@@ -10,6 +10,7 @@ from qt.core import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
+    QColor,
     QComboBox,
     QDateTime,
     QDialog,
@@ -372,12 +373,24 @@ def _palette_colors():
     )
 
 
+# JPDB ranks at or below this are highlighted as common words in the panel.
+COMMON_RANK = 10_000
+
+
 def render_entries_html(candidates, query, max_entries=50):
     ''' Render JMdict ``lookup_candidates`` output as a read-only, theme-aware
-    HTML page for the Lookup side panel (jisho-style: word 【reading】 + pos, an
-    optional annotation line for deinflection/completion, then numbered senses).
-    Text stays selectable -- that's default webview behavior. '''
+    HTML page for the Lookup side panel (jisho-style: word 【reading】 + JPDB
+    frequency rank + pos, an optional annotation line for deinflection/completion,
+    then numbered senses). Text stays selectable -- that's default webview
+    behavior. '''
+    from calibre.gui2.viewer.anki_cards.jmdict import UNRANKED
     bg, fg, muted, accent = _palette_colors()
+    # Pastel green for common words: text on a dark theme, a soft fill on a
+    # light one (pastel text alone would be unreadable on white).
+    if QColor(bg).lightness() < 128:
+        common_css = 'color: #a8dcb4; border-color: #a8dcb4;'
+    else:
+        common_css = 'color: #2f6b3d; background: #d6f0dc; border-color: #9fcfaa;'
     esc = prepare_string_for_xml
     css = f'''
     * {{ box-sizing: border-box; }}
@@ -389,6 +402,9 @@ def render_entries_html(candidates, query, max_entries=50):
     .head {{ display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.45rem; }}
     .word {{ font-size: 1.3rem; font-weight: 600; }}
     .reading {{ color: {muted}; font-size: 1rem; }}
+    .freq {{ color: {muted}; font-size: 0.8rem; border: 1px solid {muted};
+             border-radius: 0.6rem; padding: 0 0.4rem; }}
+    .freq.common {{ {common_css} }}
     .pos {{ color: {muted}; font-size: 0.8rem; margin-left: auto; }}
     .annot {{ color: {accent}; font-size: 0.85rem; margin: 0.2rem 0 0; }}
     ol.senses {{ margin: 0.3rem 0 0; padding-left: 1.5rem; }}
@@ -407,6 +423,13 @@ def render_entries_html(candidates, query, max_entries=50):
         reading_html = ''
         if reading and reading != c.get('word'):
             reading_html = f'<span class="reading">【{esc(reading)}】</span>'
+        # JPDB corpus rank (lower = more common); omitted for unranked words.
+        rank = c.get('rank')
+        freq_html = ''
+        if rank is not None and rank < UNRANKED:
+            freq_cls = 'freq common' if rank <= COMMON_RANK else 'freq'
+            freq_html = '<span class="{}" title="{}">#{:,}</span>'.format(
+                freq_cls, esc(_('JPDB frequency rank (lower is more common)')), rank)
         pos = c.get('pos') or []
         pos_html = f'<span class="pos">{esc(" · ".join(pos))}</span>' if pos else ''
 
@@ -429,7 +452,7 @@ def render_entries_html(candidates, query, max_entries=50):
 
         parts.append(
             f'<div class="entry"><div class="head">'
-            f'<span class="word">{word}</span>{reading_html}{pos_html}</div>'
+            f'<span class="word">{word}</span>{reading_html}{freq_html}{pos_html}</div>'
             f'{annot_html}{senses_html}</div>')
 
     body = ''.join(parts)

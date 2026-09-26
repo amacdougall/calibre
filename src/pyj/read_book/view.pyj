@@ -413,8 +413,12 @@ class View:
                 if entry.reasons and entry.reasons.length:
                     title = title + ' ← ' + entry.reasons.join(' ')
                 subtitle = ''
+                # JPDB frequency rank (lower = more common); 9999999 is the
+                # UNRANKED sentinel from anki_cards/jmdict.py.
+                if entry.rank and entry.rank < 9999999:
+                    subtitle = '#' + entry.rank.toLocaleString()
                 if entry.pos and entry.pos.length:
-                    subtitle = entry.pos.join(', ')
+                    subtitle = (subtitle + ' · ' if subtitle else '') + entry.pos.join(', ')
                 if entry.meaning:
                     subtitle = (subtitle + ' · ' if subtitle else '') + entry.meaning
                 items.push(create_item(title, finish.bind(None, entry), subtitle))
