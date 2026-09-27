@@ -723,7 +723,7 @@ class WebView(QWebEngineView):
         book_in_library_url = url_for_book_in_library()
         self.execute_when_ready(
             'start_book_load', key, initial_position, set_book_path.pathtoebook, highlights or [], image_inverts or [], book_url,
-            reading_rates, book_in_library_url)
+            reading_rates, book_in_library_url, (current_book_data or {}).get('anki_book_key'))
 
     def execute_when_ready(self, action, *args):
         if self.bridge.ready:

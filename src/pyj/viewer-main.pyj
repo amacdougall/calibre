@@ -133,7 +133,7 @@ def show_error(title, msg, details):
     to_python.show_error(title, msg, details)
 
 
-def manifest_received(key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url, end_type, xhr, ev):
+def manifest_received(key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url, anki_book_key, end_type, xhr, ev):
     nonlocal book
     end_type = workaround_qt_bug(xhr, end_type)
     if end_type is 'load':
@@ -148,6 +148,7 @@ def manifest_received(key, initial_position, pathtoebook, highlights, image_inve
         book.calibre_book_url = book_url
         book.calibre_book_in_library_url = book_in_library_url
         book.saved_reading_rates = reading_rates
+        book.anki_book_key = anki_book_key
         book.is_complete = True
         v'delete book.manifest["metadata"]'
         v'delete book.manifest["last_read_positions"]'
@@ -295,8 +296,8 @@ def redraw_tts_bar(pos):
 
 
 @from_python
-def start_book_load(key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url):
-    xhr = ajax('manifest', manifest_received.bind(None, key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url), ok_code=0)
+def start_book_load(key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url, anki_book_key):
+    xhr = ajax('manifest', manifest_received.bind(None, key, initial_position, pathtoebook, highlights, image_inverts, book_url, reading_rates, book_in_library_url, anki_book_key), ok_code=0)
     xhr.responseType = 'json'
     xhr.send()
 

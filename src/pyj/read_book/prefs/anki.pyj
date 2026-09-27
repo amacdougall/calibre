@@ -7,10 +7,12 @@ from elementmaker import E
 from book_list.globals import get_session_data
 from dom import unique_id
 from gettext import gettext as _
+from read_book.globals import current_book
 from read_book.prefs.utils import create_button_box
 from session import session_defaults
 
 CONTAINER = unique_id('anki-settings')
+BOOK_DECK = unique_id('anki-book-deck')
 
 
 def get_container():
@@ -22,6 +24,14 @@ def restore_defaults():
     sd = session_defaults()
     for control in container.querySelectorAll('input[name]'):
         control.value = sd[control.getAttribute('name')]
+    book_inp = document.getElementById(BOOK_DECK)
+    if book_inp:
+        book_inp.value = ''
+
+
+def current_book_key():
+    book = current_book()
+    return book.anki_book_key if book else None
 
 
 def create_anki_panel(container, apply_func, cancel_func):
@@ -38,8 +48,18 @@ def create_anki_panel(container, apply_func, cancel_func):
     inp.value = sd.get('anki_deck') or ''
     container.appendChild(E.div(
         style='margin-top: 2ex',
-        E.label(_('Name of the Anki deck to add mined cards to:'), E.br(), inp)
+        E.label(_('Default Anki deck to add mined cards to:'), E.br(), inp)
     ))
+
+    key = current_book_key()
+    if key:
+        book_inp = E.input(type='text', id=BOOK_DECK, size='40', style='margin-top: 1ex',
+                           placeholder=_('Blank to use the default deck'))
+        book_inp.value = (sd.get('anki_book_decks') or {})[key] or ''
+        container.appendChild(E.div(
+            style='margin-top: 2ex',
+            E.label(_('Deck for this book ({}):').format(current_book().metadata.title), E.br(), book_inp)
+        ))
 
     container.appendChild(create_button_box(restore_defaults, apply_func, cancel_func))
 
@@ -56,6 +76,18 @@ def commit_anki(onchange):
         val = (control.value or '').strip() or session_defaults()[name]
         if val is not sd.get(name):
             sd.set(name, val)
+            changed = True
+    key = current_book_key()
+    book_inp = document.getElementById(BOOK_DECK)
+    if key and book_inp:
+        book_decks = Object.assign({}, sd.get('anki_book_decks') or {})
+        val = (book_inp.value or '').strip()
+        if val is not (book_decks[key] or ''):
+            if val:
+                book_decks[key] = val
+            else:
+                v'delete book_decks[key]'
+            sd.set('anki_book_decks', book_decks)
             changed = True
     if changed:
         onchange()

@@ -500,7 +500,9 @@ class EbookViewer(MainWindow):
             from calibre.gui2.viewer.anki_cards.kaishi import MODEL_NAME, build_fields
         except ImportError as e:
             return error_dialog(self, _('Anki integration unavailable'), str(e), show=True)
-        deck = get_session_pref('anki_deck', default='くまクマ熊ベアー', group=None)
+        book_decks = get_session_pref('anki_book_decks', default=None, group=None) or {}
+        deck = book_decks.get(self.current_book_data.get('anki_book_key')) or get_session_pref(
+            'anki_deck', default='くまクマ熊ベアー', group=None)
         client = AnkiConnect()
         note = build_note(deck, MODEL_NAME, build_fields(
             word=word, sentence=sentence, reading=reading, meaning=meaning))
@@ -769,7 +771,11 @@ class EbookViewer(MainWindow):
         self.lookup_widget.book_loaded(self.current_book_data)
 
     def load_book_data(self, calibre_book_data=None):
-        self.current_book_data['book_library_details'] = get_book_library_details(self.current_book_data['pathtoebook'])
+        self.current_book_data['book_library_details'] = bld = get_book_library_details(self.current_book_data['pathtoebook'])
+        # Stable per-book key for the Anki book->deck map: library + book id
+        # survives title/author edits (which move the file), unlike the path.
+        self.current_book_data['anki_book_key'] = (
+            f"{bld['library_id']}:{bld['book_id']}" if bld else path_key(self.current_book_data['pathtoebook']))
         if calibre_book_data is not None:
             self.current_book_data['calibre_book_id'] = calibre_book_data['book_id']
             self.current_book_data['calibre_book_uuid'] = calibre_book_data['uuid']
