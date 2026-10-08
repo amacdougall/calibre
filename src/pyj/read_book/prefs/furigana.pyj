@@ -1,0 +1,76 @@
+# vim:fileencoding=utf-8
+# License: GPL v3 Copyright: 2026
+from __python__ import bound_methods, hash_literals
+
+from elementmaker import E
+
+from book_list.globals import get_session_data
+from dom import unique_id
+from gettext import gettext as _
+from read_book.prefs.utils import create_button_box
+from session import session_defaults
+
+CONTAINER = unique_id('furigana-settings')
+MODE = unique_id('furigana-mode')
+THRESHOLD = unique_id('furigana-threshold')
+
+
+def restore_defaults():
+    sd = session_defaults()
+    document.getElementById(MODE).value = sd.furigana_mode
+    document.getElementById(THRESHOLD).value = str(sd.furigana_rank_threshold)
+
+
+def create_furigana_panel(container, apply_func, cancel_func):
+    container.appendChild(E.div(id=CONTAINER, style='margin: 1rem'))
+    container = container.lastChild
+    sd = get_session_data()
+
+    container.appendChild(E.div(
+        _('Control the display of furigana (ruby readings over kanji). Use the'
+          ' "Cycle furigana" keyboard shortcut (Ctrl+Shift+R by default) to switch'
+          ' modes while reading.')
+    ))
+
+    select = E.select(id=MODE, style='margin-top: 1ex')
+    for val, text in [
+        ('show', _('Show all furigana')),
+        ('rare', _('Show furigana only on rare words')),
+        ('hide', _('Hide all furigana')),
+    ]:
+        select.appendChild(E.option(text, value=val))
+    select.value = sd.get('furigana_mode')
+    container.appendChild(E.div(style='margin-top: 2ex', E.label(_('Furigana:'), E.br(), select)))
+
+    inp = E.input(type='number', id=THRESHOLD, min='0', step='1000', style='margin-top: 1ex')
+    inp.value = str(sd.get('furigana_rank_threshold'))
+    container.appendChild(E.div(
+        style='margin-top: 2ex',
+        E.label(_('Rare word threshold (JPDB frequency rank):'), E.br(), inp),
+        E.div(style='margin-top: 1ex; font-size: smaller',
+              _('In "rare words" mode, furigana is shown for words ranked beyond this'
+                ' (lower rank = more common), and for words not in the frequency list,'
+                ' such as most proper names. Raise it to see fewer readings.'))
+    ))
+
+    container.appendChild(create_button_box(restore_defaults, apply_func, cancel_func))
+
+
+develop = create_furigana_panel
+
+
+def commit_furigana(onchange):
+    sd = get_session_data()
+    changed = False
+    mode = document.getElementById(MODE).value
+    if mode is not sd.get('furigana_mode'):
+        sd.set('furigana_mode', mode)
+        changed = True
+    threshold = parseInt(document.getElementById(THRESHOLD).value)
+    if isNaN(threshold) or threshold < 0:
+        threshold = session_defaults().furigana_rank_threshold
+    if threshold is not sd.get('furigana_rank_threshold'):
+        sd.set('furigana_rank_threshold', threshold)
+        changed = True
+    if changed:
+        onchange()

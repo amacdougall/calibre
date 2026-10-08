@@ -285,6 +285,14 @@ class View:
                 if ui_operations.report_anki_sentence:
                     ui_operations.report_anki_sentence(data.word, data.sentence)
             ,
+            'furigana_ranks_request': def(data):
+                if ui_operations.request_furigana_ranks:
+                    ui_operations.request_furigana_ranks(data.items)
+                else:
+                    # No dictionary (content server viewer): everything is
+                    # unranked, so rare mode degrades to showing all furigana.
+                    self.furigana_ranks(data.items, v'[]')
+            ,
         }
 
         iframe_id = unique_id('read-book-iframe')
@@ -346,6 +354,8 @@ class View:
         # request_id -> fn(candidates, word) that refreshes an open Anki popup's
         # candidate list when Python answers a re-lookup (see show_anki_candidates).
         self._anki_candidate_updaters = {}
+        self.flash_message_id = unique_id('flash-message')
+        self.flash_message_timer = None
         self.currently_showing = {'selection': {'empty': True}, 'on_load':v'[]'}
         self.book_scrollbar.apply_visibility()
         self.annotations_manager = AnnotationsManager(self)
@@ -362,6 +372,35 @@ class View:
         # highlighted word and its enclosing sentence; it replies with an
         # 'anki_sentence' message handled above.
         self.iframe_wrapper.send_message('extract_anki_sentence')
+
+    def cycle_furigana_mode(self):
+        sd = get_session_data()
+        modes = v"['show', 'rare', 'hide']"
+        mode = modes[(modes.indexOf(sd.get('furigana_mode')) + 1) % modes.length]
+        sd.set('furigana_mode', mode)
+        self.iframe_wrapper.send_message('set_furigana', mode=mode, threshold=sd.get('furigana_rank_threshold'))
+        self.flash_message({
+            'show': _('Furigana: all'),
+            'rare': _('Furigana: rare words only (rank > {})').format(sd.get('furigana_rank_threshold')),
+            'hide': _('Furigana: hidden'),
+        }[mode])
+
+    def furigana_ranks(self, items, ranks):
+        self.iframe_wrapper.send_message('furigana_ranks', items=items, ranks=ranks)
+
+    def flash_message(self, msg):
+        # Brief centered notice over the book, for shortcut-driven toggles
+        el = document.getElementById(self.flash_message_id)
+        if not el:
+            el = E.div(id=self.flash_message_id, style=(
+                'position: fixed; left: 50%; top: 40%; transform: translateX(-50%); z-index: 3000;'
+                ' padding: 0.6em 1.2em; border-radius: 8px; font-size: 1.1rem; pointer-events: none;'
+                ' background: rgba(0, 0, 0, 0.75); color: white; transition: opacity 0.3s'))
+            document.body.appendChild(el)
+        el.textContent = msg
+        el.style.opacity = '1'
+        window.clearTimeout(self.flash_message_timer)
+        self.flash_message_timer = window.setTimeout(def(): el.style.opacity = '0';, 1500)
 
     def show_anki_candidates(self, request_id, candidates, raw_word):
         # Python looked the selection up in JMdict and pushed the candidate
@@ -657,6 +696,8 @@ class View:
             self.copy_to_clipboard()
         elif data.name is 'extract_anki_sentence':
             self.extract_anki_sentence()
+        elif data.name is 'cycle_furigana_mode':
+            self.cycle_furigana_mode()
         elif data.name is 'copy_location_to_clipboard' or data.name is 'copy_location_as_url_to_clipboard':
             self.copy_current_location_to_clipboard('url' in data.name)
         elif data.name is 'toggle_inspector':
@@ -1233,6 +1274,8 @@ class View:
             'scroll_stop_boundaries': sd.get('scroll_stop_boundaries'),
             'reverse_page_turn_zones': sd.get('reverse_page_turn_zones'),
             'gesture_overrides': sd.get('gesture_overrides'),
+            'furigana_mode': sd.get('furigana_mode'),
+            'furigana_rank_threshold': sd.get('furigana_rank_threshold'),
         }
 
     def show_name(self, name, initial_position=None):

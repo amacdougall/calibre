@@ -93,6 +93,8 @@ all_settings = {
     'tts_bar_position': {'default': 'float', 'category': 'read_book', 'is_local': False, 'disallowed_in_profile': False},
     'anki_deck': {'default': 'くまクマ熊ベアー', 'category': 'read_book', 'is_local': True},
     'anki_book_decks': {'default': {}, 'category': 'read_book', 'is_local': True},
+    'furigana_mode': {'default': 'show', 'category': 'read_book', 'is_local': True},
+    'furigana_rank_threshold': {'default': 10000, 'category': 'read_book', 'is_local': True},
 }
 
 defaults = {}

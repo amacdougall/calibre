@@ -12,6 +12,7 @@ from read_book.globals import runtime
 from read_book.prefs.anki import commit_anki, create_anki_panel
 from read_book.prefs.colors import commit_colors, create_colors_panel
 from read_book.prefs.fonts import commit_fonts, create_fonts_panel
+from read_book.prefs.furigana import commit_furigana, create_furigana_panel
 from read_book.prefs.head_foot import commit_head_foot, create_head_foot_panel
 from read_book.prefs.keyboard import commit_keyboard, create_keyboard_panel
 from read_book.prefs.layout import commit_layout, create_layout_panel
@@ -111,6 +112,7 @@ class Prefs:
         ci(_('Touch behavior'), 'touch', _('Customize what various touchscreen gestures do'))
         ci(_('Keyboard shortcuts'), 'keyboard', _('Customize the keyboard shortcuts'))
         ci(_('Anki integration'), 'anki', _('Configure mining cards into Anki while reading'))
+        ci(_('Furigana'), 'furigana', _('Show, hide, or show furigana only on rare words'))
         if runtime.is_standalone_viewer:
             ci(_('Fonts'), 'fonts', _('Font choices'))
             ci(_('Miscellaneous'), 'misc', _('Window size, last read position, toolbar, etc.'))
@@ -181,6 +183,12 @@ class Prefs:
 
     def close_anki(self):
         commit_anki(self.onchange, self.container)
+
+    def display_furigana(self, container):
+        self.create_panel(container, 'furigana', create_furigana_panel)
+
+    def close_furigana(self):
+        commit_furigana(self.onchange, self.container)
 
 
 

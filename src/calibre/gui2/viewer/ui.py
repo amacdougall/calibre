@@ -213,6 +213,9 @@ class EbookViewer(MainWindow):
         self.web_view.report_anki_sentence.connect(self.on_anki_selection, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.choose_anki_candidate.connect(self.add_to_anki, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.relookup_anki_candidates.connect(self.on_relookup_anki_candidates, type=Qt.ConnectionType.QueuedConnection)
+        # Rare-word furigana: the book iframe asks for JPDB ranks of its ruby words
+        self._furigana_ranker = None
+        self.web_view.request_furigana_ranks.connect(self.on_request_furigana_ranks, type=Qt.ConnectionType.QueuedConnection)
         self.web_view.show_loading_message.connect(self.show_loading_message)
         self.web_view.show_error.connect(self.show_error)
         self.web_view.print_book.connect(self.print_book, type=Qt.ConnectionType.QueuedConnection)
@@ -463,6 +466,22 @@ class EbookViewer(MainWindow):
         self._anki_next_request_id += 1
         self._anki_pending[request_id] = {'sentence': sentence, 'word': word}
         self.web_view.execute_when_ready('show_anki_candidates', request_id, candidates, word)
+
+    def on_request_furigana_ranks(self, items):
+        # items: [[ruby base text, text following the ruby], ...]. Always answer,
+        # even on failure (empty ranks = unranked = furigana shown), so the
+        # iframe doesn't leave readings hidden waiting for us.
+        items = list(items or ())
+        ranks = []
+        try:
+            if self._furigana_ranker is None:
+                from calibre.gui2.viewer.anki_cards.furigana import FuriganaRanker
+                self._furigana_ranker = FuriganaRanker()
+            ranks = self._furigana_ranker.ranks(items)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+        self.web_view.execute_when_ready('furigana_ranks', items, ranks)
 
     def on_relookup_anki_candidates(self, request_id, word):
         # The user edited the word in the Anki popup. Re-run the JMdict lookup and

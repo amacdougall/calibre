@@ -1,0 +1,177 @@
+# vim:fileencoding=utf-8
+# License: GPL v3 Copyright: 2026
+# Furigana visibility, runs inside the book iframe.
+#
+# Modes (session pref furigana_mode):
+#   show -- the book's furigana as authored
+#   hide -- no furigana
+#   rare -- furigana only on words rarer than furigana_rank_threshold (JPDB rank),
+#           plus anything the dictionary doesn't know (proper names, rare words)
+#
+# Hidden readings use visibility: hidden rather than display: none, so toggling
+# never changes line heights: no reflow, no page re-pagination, and rare-mode
+# readings can be revealed asynchronously without the text jumping around.
+#
+# Ruby markup comes in several shapes:
+#   <ruby>漢字<rt>かんじ</rt></ruby>
+#   <ruby>漢<rt>かん</rt>字<rt>じ</rt></ruby>
+#   <ruby>漢<rt>かん</rt></ruby><ruby>字<rt>じ</rt></ruby>
+# The last (per-character ruby) is handled by grouping runs of adjacent
+# single-character rubies into one word. A multi-character ruby is taken to be
+# a whole word, so adjacent ones (本気<rt>マジ</rt>山田<rt>やまだ</rt>) stay separate.
+# A group whose readings contain no hiragana is never hidden: katakana glosses
+# over kanji (本気<rt>マジ</rt>) carry meaning, and emphasis dots (傍点) drawn as
+# ruby (<rt>・</rt>) aren't readings at all.
+from __python__ import bound_methods, hash_literals
+
+from elementmaker import E
+
+from read_book.anki_sentence import enclosing_block
+from read_book.selection_text import is_ruby_annotation, strip_ruby
+
+STYLE_ID = 'calibre-furigana-style'
+HIDDEN_CLASS = 'calibre-furigana-hidden'
+# Following text sent for okurigana/compound matching; Python trims it further.
+FOLLOWING_CHARS = 8
+# Must match UNRANKED in calibre/gui2/viewer/anki_cards/jmdict.py
+UNRANKED = 9999999
+
+# (base + '\x1f' + following) -> JPDB rank. Lives for the iframe's lifetime, so
+# it carries across chapters and re-displays.
+rank_cache = {}
+# Keys sent to Python and not yet answered, so re-applying doesn't re-request.
+requested = {}
+# groups: ruby groups of the currently displayed document, {rubies, base,
+# following, key, exempt}
+state = {'mode': 'show', 'threshold': 10000, 'request_ranks': None, 'groups': v'[]'}
+
+
+def ensure_style():
+    if document.getElementById(STYLE_ID):
+        return
+    style = E.style(type='text/css', id=STYLE_ID)
+    style.textContent = f'ruby.{HIDDEN_CLASS} rt, ruby.{HIDDEN_CLASS} rtc, ruby.{HIDDEN_CLASS} rp {{ visibility: hidden !important }}'
+    document.documentElement.appendChild(style)
+
+
+def ruby_base(ruby):
+    return strip_ruby(ruby.cloneNode(True)).textContent.trim()
+
+
+def next_ruby_sibling(ruby):
+    # The ruby immediately following this one, ignoring whitespace-only text
+    node = ruby.nextSibling
+    while node and node.nodeType is Node.TEXT_NODE and not node.nodeValue.trim():
+        node = node.nextSibling
+    if node and node.nodeType is Node.ELEMENT_NODE and node.localName is 'ruby':
+        return node
+    return None
+
+
+def following_text(ruby):
+    # Base (non-furigana) text after ruby within its block, up to FOLLOWING_CHARS
+    block = enclosing_block(ruby)
+    node = ruby
+    while node and node is not block and not node.nextSibling:
+        node = node.parentNode
+    if not node or node is block:
+        return ''
+    def ruby_filter(n):
+        return NodeFilter.FILTER_REJECT if is_ruby_annotation(n) else NodeFilter.FILTER_ACCEPT
+    walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, ruby_filter, False)
+    start = node.nextSibling
+    ans = ''
+    if start.nodeType is Node.TEXT_NODE:
+        ans = start.nodeValue
+    walker.currentNode = start
+    while ans.length < FOLLOWING_CHARS:
+        t = walker.nextNode()
+        if not t:
+            break
+        ans += t.nodeValue
+    return ans[:FOLLOWING_CHARS]
+
+
+def collect_groups():
+    groups = v'[]'
+    seen = v'new Set()'
+    for ruby in document.body.querySelectorAll('ruby'):
+        if seen.has(ruby) or ruby.parentElement.closest('ruby'):
+            continue
+        rubies = v'[ruby]'
+        seen.add(ruby)
+        base = ruby_base(ruby)
+        if base.length is 1:
+            nxt = next_ruby_sibling(ruby)
+            while nxt and ruby_base(nxt).length is 1:
+                rubies.push(nxt)
+                seen.add(nxt)
+                base += ruby_base(nxt)
+                nxt = next_ruby_sibling(nxt)
+        reading = ''
+        for r in rubies:
+            for rt in r.querySelectorAll('rt'):
+                reading += rt.textContent
+        exempt = not base or not v'/[ぁ-ゖ]/.test(reading)'
+        groups.push({
+            'rubies': rubies, 'base': base, 'exempt': exempt,
+            'following': '' if exempt else following_text(rubies[-1]),
+        })
+    for g in groups:
+        g.key = g.base + '\x1f' + g.following
+    return groups
+
+
+def should_hide(g):
+    if g.exempt or state.mode is 'show':
+        return False
+    if state.mode is 'hide':
+        return True
+    rank = rank_cache[g.key]
+    # Unknown ranks stay hidden until Python answers, so common words never
+    # flash their furigana; rare ones appear a moment later.
+    return rank is undefined or rank <= state.threshold
+
+
+def apply_to_groups():
+    ensure_style()
+    missing = {}
+    for g in state.groups:
+        hide = should_hide(g)
+        for r in g.rubies:
+            r.classList.toggle(HIDDEN_CLASS, hide)
+        if state.mode is 'rare' and not g.exempt and rank_cache[g.key] is undefined and not requested[g.key]:
+            missing[g.key] = v'[g.base, g.following]'
+    items = Object.values(missing)
+    if items.length and state.request_ranks:
+        for key in Object.keys(missing):
+            requested[key] = True
+        state.request_ranks(items)
+
+
+def set_options(mode, threshold):
+    state.mode = mode or 'show'
+    state.threshold = threshold or 0
+
+
+def set_furigana_mode(mode, threshold):
+    # Mode change on the already displayed document (keyboard shortcut)
+    set_options(mode, threshold)
+    apply_to_groups()
+
+
+def apply_furigana_on_load(mode, threshold, request_ranks):
+    # Called once a new document is in place. Visibility only, so it doesn't
+    # matter that the async rank answer lands after layout.
+    set_options(mode, threshold)
+    state.request_ranks = request_ranks
+    state.groups = collect_groups()
+    apply_to_groups()
+
+
+def furigana_ranks_received(items, ranks):
+    for i in range(items.length):
+        key = items[i][0] + '\x1f' + items[i][1]
+        rank_cache[key] = ranks[i] if ranks and ranks[i]? else UNRANKED
+        v'delete requested[key]'
+    apply_to_groups()

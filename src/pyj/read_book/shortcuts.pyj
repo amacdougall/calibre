@@ -212,6 +212,12 @@ def common_shortcuts():  # {{{
         _('Add highlighted word and sentence to Anki'),
     ),
 
+    'cycle_furigana_mode': desc(
+        v"['Ctrl+Shift+r', 'Meta+Shift+r']",
+        'ui',
+        _('Cycle furigana: show all, only rare words, hide all'),
+    ),
+
     'copy_location_to_clipboard': desc(
         v"['Alt+c']",
         'ui',

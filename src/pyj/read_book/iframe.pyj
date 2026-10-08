@@ -19,6 +19,7 @@ from range_utils import (
 )
 from read_book.anchor_visibility import ensure_page_list_target_is_displayed, invalidate_anchor_position_cache
 from read_book.anki_sentence import sentence_for_selection
+from read_book.furigana import apply_furigana_on_load, furigana_ranks_received, set_furigana_mode
 from read_book.cfi import cfi_for_selection, range_from_cfi
 from read_book.extract import get_elements
 from read_book.find import reset_find_caches, select_search_result, select_tts_mark, tts_data
@@ -199,6 +200,8 @@ class IframeBoss:
             'copy_selection': self.copy_selection,
             'replace_highlights': self.replace_highlights,
             'toggle_invert_image': self.toggle_invert_image,
+            'set_furigana': self.set_furigana,
+            'furigana_ranks': def(data): furigana_ranks_received(data.items, data.ranks);,
             'clear_selection': def(): window.getSelection().removeAllRanges();,
         }
         self.comm = IframeClient(handlers, 'main-iframe')
@@ -481,6 +484,7 @@ class IframeBoss:
             for calibre_src in self.image_inverts_to_apply:
                 self.apply_invert_to_image_elements(calibre_src, True)
             self.image_inverts_to_apply = None
+        apply_furigana_on_load(opts.furigana_mode, opts.furigana_rank_threshold, self.request_furigana_ranks)
         invalidate_anchor_position_cache()
         fix_fullscreen_svg_images()
         self.do_layout(self.is_titlepage)
@@ -783,6 +787,14 @@ class IframeBoss:
                 img.style.setProperty('filter', f'url(#{IMAGE_INVERT_FILTER_ID})', 'important')
             else:
                 img.style.removeProperty('filter')
+
+    def request_furigana_ranks(self, items):
+        self.send_message('furigana_ranks_request', items=items)
+
+    def set_furigana(self, data):
+        opts.furigana_mode = data.mode
+        opts.furigana_rank_threshold = data.threshold
+        set_furigana_mode(data.mode, data.threshold)
 
     def toggle_invert_image(self, data):
         # the parent frame owns the persisted inverted/not-inverted state (so it

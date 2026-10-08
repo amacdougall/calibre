@@ -34,6 +34,8 @@ def update_settings(settings):
     opts.reverse_page_turn_zones = v'!!settings.reverse_page_turn_zones'
     opts.user_stylesheet = settings.user_stylesheet
     opts.gesture_overrides = settings.gesture_overrides
+    opts.furigana_mode = settings.furigana_mode or 'show'
+    opts.furigana_rank_threshold = settings.furigana_rank_threshold
 
 update_settings()
 
