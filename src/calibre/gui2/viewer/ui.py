@@ -521,7 +521,7 @@ class EbookViewer(MainWindow):
             return error_dialog(self, _('Anki integration unavailable'), str(e), show=True)
         book_decks = get_session_pref('anki_book_decks', default=None, group=None) or {}
         deck = book_decks.get(self.current_book_data.get('anki_book_key')) or get_session_pref(
-            'anki_deck', default='くまクマ熊ベアー', group=None)
+            'anki_deck', default='Default', group=None)
         client = AnkiConnect()
         note = build_note(deck, MODEL_NAME, build_fields(
             word=word, sentence=sentence, reading=reading, meaning=meaning))
