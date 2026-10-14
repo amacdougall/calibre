@@ -657,7 +657,7 @@ class IframeBoss:
         # Compute the highlighted word + its enclosing Japanese sentence from the
         # live selection in the book DOM, and send it back to the main process,
         # which forwards it to Python (-> the Anki client library).
-        result = sentence_for_selection(window.getSelection())
+        result = sentence_for_selection(window.getSelection(), bool(data.strip_speaker_tags))
         if result:
             self.send_message('anki_sentence', word=result.word, sentence=result.sentence)
 

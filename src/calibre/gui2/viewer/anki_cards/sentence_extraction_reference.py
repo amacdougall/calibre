@@ -4,6 +4,8 @@
 # pyj is Python-syntax so the two stay line-for-line equivalent. Runnable without
 # a Calibre build:  python3 sentence_extraction_reference.py
 
+import re
+
 BRACKETS = {'「': '」', '『': '』', '（': '）', '(': ')', '【': '】',
             '〈': '〉', '《': '》', '〔': '〕', '｛': '｝', '{': '}', '［': '］', '[': ']'}
 OPEN = set(BRACKETS.keys())
@@ -11,9 +13,17 @@ CLOSE = set(BRACKETS.values())
 DELIMS = set('。！？.!?\n\r')
 # chars allowed to be pulled in *after* a terminal delimiter (closing quotes, etc.)
 TRAILING = set('。、！？…‥」』）)】〉》〕｝}］]')
+WHITESPACE = set(' \t\u3000')
+SPEAKER_TAG = re.compile('^[\u4e00-\u9fff々〆ヶ]{1,4}\u3000')
 
 
-def extract_sentence(text, offset):
+def speaker_tag_length(text, start):
+    # Leading dialogue speaker tag (1-4 kanji + full-width space, e.g. "筆者　").
+    m = SPEAKER_TAG.match(text[start:start + 5])
+    return len(m.group()) if m else 0
+
+
+def extract_sentence(text, offset, strip_speaker_tag=False):
     # --- scan backward to sentence start, ignoring delimiters inside brackets ---
     depth = 0
     start = 0
@@ -45,6 +55,15 @@ def extract_sentence(text, offset):
                 end += 1
             break
         i += 1
+
+    # --- optionally drop a speaker tag, only at the start of a paragraph/line
+    # and only when the selection is past it (so the tag itself can be mined) ---
+    if strip_speaker_tag and (start == 0 or text[start - 1] in '\n\r'):
+        while start < offset and text[start] in WHITESPACE:
+            start += 1
+        tag_len = speaker_tag_length(text, start)
+        if tag_len and offset >= start + tag_len:
+            start += tag_len
 
     return trim_dangling_brackets(text[start:end].strip())
 
@@ -80,6 +99,20 @@ CASES = [
     ('彼は『吾輩は猫である。名前はまだ無い。』を読んだ。', '読んだ', 'nested book-title quote'),
 ]
 
+SPEAKER_CASES = [
+    # (paragraph, selected substring, expected sentence with strip_speaker_tag=True)
+    ('筆者　えーと……実は今、引っ越しを考えていまして。', '引っ越し', 'えーと……実は今、引っ越しを考えていまして。'),
+    ('筆者　えーと……実は今、引っ越しを考えていまして。', '筆者', '筆者　えーと……実は今、引っ越しを考えていまして。'),
+    ('栗原　やっぱり私は、殺された四人目がいると思うんですよ。これを見てください。', '見て', 'これを見てください。'),
+    ('内側から鍵がかかっていたのではないですか？', '鍵', '内側から鍵がかかっていたのではないですか？'),
+    ('　筆者は家に入った。', '家', '筆者は家に入った。'),
+    ('猫が好きだ。\n片淵　どうでしょう。', 'どう', 'どうでしょう。'),
+]
+
 for para, sub, label in CASES:
     off = para.index(sub)
     print(f'{label:28} | sel={sub!r:8} -> {extract_sentence(para, off)!r}')
+
+for para, sub, expected in SPEAKER_CASES:
+    got = extract_sentence(para, para.index(sub), strip_speaker_tag=True)
+    print(f'{"OK " if got == expected else "FAIL"} speaker | sel={sub!r:8} -> {got!r}')

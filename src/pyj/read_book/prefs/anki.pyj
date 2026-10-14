@@ -13,6 +13,7 @@ from session import session_defaults
 
 CONTAINER = unique_id('anki-settings')
 BOOK_DECK = unique_id('anki-book-deck')
+BOOK_STRIP = unique_id('anki-book-strip-speaker')
 
 
 def get_container():
@@ -27,6 +28,9 @@ def restore_defaults():
     book_inp = document.getElementById(BOOK_DECK)
     if book_inp:
         book_inp.value = ''
+    strip_inp = document.getElementById(BOOK_STRIP)
+    if strip_inp:
+        strip_inp.checked = False
 
 
 def current_book_key():
@@ -60,6 +64,12 @@ def create_anki_panel(container, apply_func, cancel_func):
             style='margin-top: 2ex',
             E.label(_('Deck for this book ({}):').format(current_book().metadata.title), E.br(), book_inp)
         ))
+        strip_inp = E.input(type='checkbox', id=BOOK_STRIP, style='margin-left: 0')
+        strip_inp.checked = bool((sd.get('anki_book_strip_speaker_tags') or {})[key])
+        container.appendChild(E.div(
+            style='margin-top: 2ex',
+            E.label(strip_inp, _('Omit speaker tags from dialogue lines in this book (e.g. 筆者\u3000…)'))
+        ))
 
     container.appendChild(create_button_box(restore_defaults, apply_func, cancel_func))
 
@@ -88,6 +98,16 @@ def commit_anki(onchange):
             else:
                 v'delete book_decks[key]'
             sd.set('anki_book_decks', book_decks)
+            changed = True
+    strip_inp = document.getElementById(BOOK_STRIP)
+    if key and strip_inp:
+        book_strip = Object.assign({}, sd.get('anki_book_strip_speaker_tags') or {})
+        if strip_inp.checked is not bool(book_strip[key]):
+            if strip_inp.checked:
+                book_strip[key] = True
+            else:
+                v'delete book_strip[key]'
+            sd.set('anki_book_strip_speaker_tags', book_strip)
             changed = True
     if changed:
         onchange()

@@ -371,7 +371,9 @@ class View:
         # Ask the iframe (which owns the book DOM + selection) to compute the
         # highlighted word and its enclosing sentence; it replies with an
         # 'anki_sentence' message handled above.
-        self.iframe_wrapper.send_message('extract_anki_sentence')
+        book_key = self.book.anki_book_key if self.book else None
+        strip = bool(book_key and (get_session_data().get('anki_book_strip_speaker_tags') or {})[book_key])
+        self.iframe_wrapper.send_message('extract_anki_sentence', strip_speaker_tags=strip)
 
     def cycle_furigana_mode(self):
         sd = get_session_data()

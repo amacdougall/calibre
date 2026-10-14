@@ -22,6 +22,17 @@ DELIMS = '。！？.!?\n\r'
 TRAILING = '。、！？…‥」』）)】〉》〕｝}］]'  # chars pulled in after a terminal delimiter
 OPEN = '「『（(【〈《〔｛{［['
 CLOSE = '」』）)】〉》〕｝}］]'  # index-aligned with OPEN: OPEN[i] closes with CLOSE[i]
+WHITESPACE = ' \t\u3000'
+
+
+# Length of a leading dialogue speaker tag (1-4 kanji + full-width space, e.g.
+# "筆者　") at text[start:], or 0 if there is none. Used by the per-book
+# "omit speaker tags" option; plain-text matching rather than markup because
+# books bold the tag the same way they bold ordinary emphasis.
+def speaker_tag_length(text, start):
+    head = text[start:start + 5]
+    m = v'/^[\u4e00-\u9fff々〆ヶ]{1,4}\u3000/.exec(head)'
+    return m[0].length if m else 0
 
 
 def opener_for(close_char):
@@ -52,7 +63,7 @@ def trim_dangling_brackets(s):
     return s
 
 
-def extract_sentence(text, offset):
+def extract_sentence(text, offset, strip_speaker_tag=False):
     # --- scan backward to sentence start, ignoring delimiters inside brackets ---
     depth = 0
     start = 0
@@ -84,6 +95,15 @@ def extract_sentence(text, offset):
                 end += 1
             break
         i += 1
+
+    # --- optionally drop a speaker tag, only at the start of a paragraph/line
+    # and only when the selection is past it (so the tag itself can be mined) ---
+    if strip_speaker_tag and (start is 0 or '\n\r'.indexOf(text[start - 1]) is not -1):
+        while start < offset and WHITESPACE.indexOf(text[start]) is not -1:
+            start += 1
+        tag_len = speaker_tag_length(text, start)
+        if tag_len and offset >= start + tag_len:
+            start += tag_len
 
     return trim_dangling_brackets(text[start:end].trim())
 
@@ -119,9 +139,9 @@ def block_text_and_offset(anchor, anchor_offset):
 
 
 # Returns {word, sentence} for the current selection, or None if nothing is selected.
-def sentence_for_selection(sel):
+def sentence_for_selection(sel, strip_speaker_tag=False):
     if not sel or sel.rangeCount is 0 or sel.isCollapsed:
         return None
     r = sel.getRangeAt(0)
     full, offset = block_text_and_offset(r.startContainer, r.startOffset)
-    return {'word': selection_text(sel), 'sentence': extract_sentence(full, offset)}
+    return {'word': selection_text(sel), 'sentence': extract_sentence(full, offset, strip_speaker_tag)}
